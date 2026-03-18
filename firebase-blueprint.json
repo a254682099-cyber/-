@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and role information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "ledger_admin", "auditor", "collector", "readonly"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Ledger": {
+      "title": "Ledger",
+      "description": "A collaborative ledger container.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uid": { "type": "string" },
+              "role": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerUid"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Borrower or client information.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "idCard": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ledgerId", "name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A loan or investment transaction.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "principal": { "type": "number" },
+        "interestRate": { "type": "number" },
+        "termDays": { "type": "integer" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending_approval", "active", "overdue", "completed", "cancelled"] },
+        "collectorUid": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ledgerId", "customerId", "principal", "interestRate", "startDate", "status"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Record of all sensitive operations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "uid": { "type": "string" },
+        "action": { "type": "string" },
+        "targetId": { "type": "string" },
+        "oldValue": { "type": "string" },
+        "newValue": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ledgerId", "uid", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/ledgers/{ledgerId}": { "schema": "Ledger", "description": "Ledgers" },
+    "/customers/{customerId}": { "schema": "Customer", "description": "Customers" },
+    "/orders/{orderId}": { "schema": "Order", "description": "Orders" },
+    "/auditLogs/{logId}": { "schema": "AuditLog", "description": "Audit logs" }
+  }
+}

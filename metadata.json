@@ -1,0 +1,5 @@
+{
+  "name": "Smart Collaborative Ledger",
+  "description": "A collaborative ledger system for small-scale finance, private lending, and investment management with automated reminders and audit trails.",
+  "requestFramePermissions": []
+}

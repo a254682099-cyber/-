@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' ||
+         (request.auth.token.email == "a254682099@gmail.com" && request.auth.token.email_verified == true));
+    }
+    
+    function getLedger(ledgerId) {
+      return get(/databases/$(database)/documents/ledgers/$(ledgerId)).data;
+    }
+    
+    function isLedgerMember(ledgerId) {
+      let ledger = getLedger(ledgerId);
+      return isAuthenticated() && (ledger.ownerUid == request.auth.uid || ledger.members.hasAny([{'uid': request.auth.uid, 'role': 'ledger_admin'}, {'uid': request.auth.uid, 'role': 'auditor'}, {'uid': request.auth.uid, 'role': 'collector'}, {'uid': request.auth.uid, 'role': 'readonly'}]));
+    }
+
+    function hasLedgerRole(ledgerId, roles) {
+      let ledger = getLedger(ledgerId);
+      return isAuthenticated() && (
+        (ledger.ownerUid == request.auth.uid) ||
+        ledger.members.exists(m, m.uid == request.auth.uid && m.role in roles)
+      );
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin() || (isAuthenticated() && request.auth.uid == uid);
+    }
+
+    match /ledgers/{ledgerId} {
+      allow read: if isSuperAdmin() || isLedgerMember(ledgerId);
+      allow create: if isAuthenticated();
+      allow update, delete: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
+    }
+
+    match /customers/{customerId} {
+      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
+      allow create: if isAuthenticated() && hasLedgerRole(request.resource.data.ledgerId, ['ledger_admin', 'collector']);
+      allow update: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin', 'collector']));
+      allow delete: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin']));
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
+      allow create: if isAuthenticated() && hasLedgerRole(request.resource.data.ledgerId, ['ledger_admin', 'collector']);
+      allow update: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin', 'auditor', 'collector']));
+      allow delete: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin']));
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
+      allow create: if isAuthenticated(); // Application logic should handle this
+      allow update, delete: if false; // Audit logs are immutable
+    }
+  }
+}
