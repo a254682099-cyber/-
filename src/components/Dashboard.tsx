@@ -115,7 +115,7 @@ export const Dashboard: React.FC = () => {
               <Link
                 key={ledger.id}
                 to={`/ledger/${ledger.id}`}
-                className="group bg-white p-8 rounded-3xl shadow-sm border border-neutral-100 hover:border-emerald-200 hover:shadow-md transition-all relative overflow-hidden"
+                className="group bg-white p-8 rounded-3xl shadow-sm border border-neutral-100 hover:border-emerald-200 hover:shadow-md transition-all relative overflow-hidden block"
               >
                 <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-12 -mt-12 transition-all group-hover:scale-110"></div>
                 <div className="relative">

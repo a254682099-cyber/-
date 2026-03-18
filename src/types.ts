@@ -43,6 +43,7 @@ export interface Order {
   startDate: string;
   dueDate: string;
   status: OrderStatus;
+  paidAmount?: number; // Track partial or full payments
   collectorUid?: string;
   notes?: string;
   createdAt: string;

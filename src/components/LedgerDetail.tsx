@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { CustomerForm } from './CustomerForm';
 import { OrderForm } from './OrderForm';
+import { PaymentModal } from './PaymentModal';
 import { format } from 'date-fns';
 import { UserRole } from '../types';
 
@@ -36,6 +37,7 @@ export const LedgerDetail: React.FC = () => {
   
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [selectedCustomerForOrder, setSelectedCustomerForOrder] = useState<any | null>(null);
+  const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   // Add Member State
@@ -202,22 +204,34 @@ export const LedgerDetail: React.FC = () => {
             {filteredOrders.map((order) => {
               const customer = customers.find(c => c.id === order.customerId);
               const StatusIcon = getStatusIcon(order.status);
+              const calculatedInterest = (order.principal || 0) * (order.interestRate || 0) / 100;
+              const totalDue = (order.principal || 0) + calculatedInterest;
+              const currentPaid = order.paidAmount || 0;
+              const progress = Math.min(100, Math.round((currentPaid / totalDue) * 100)) || 0;
+
               return (
                 <div key={order.id} className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100 flex flex-col md:flex-row md:items-center justify-between gap-4 group hover:shadow-md transition-all">
-                  <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-6 flex-1">
                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${getStatusColor(order.status)} shrink-0`}>
                       <StatusIcon className="w-7 h-7" />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <h4 className="text-lg font-bold text-neutral-900">{customer?.name || 'Unknown Customer'}</h4>
-                      <p className="text-sm text-neutral-500 flex items-center gap-2">
+                      <p className="text-sm text-neutral-500 flex items-center gap-2 mb-2">
                         <Calendar className="w-4 h-4" />
                         Due {format(new Date(order.dueDate), 'MMM dd, yyyy')}
+                      </p>
+                      {/* Progress Bar */}
+                      <div className="w-full max-w-xs bg-neutral-100 rounded-full h-2.5 mb-1">
+                        <div className="bg-emerald-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div>
+                      </div>
+                      <p className="text-xs text-neutral-500 font-medium">
+                        Paid: ${currentPaid.toLocaleString()} / ${totalDue.toLocaleString()} ({progress}%)
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-6 md:gap-12">
+                  <div className="flex flex-wrap items-center gap-6 md:gap-8">
                     <div className="text-right">
                       <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">Principal</p>
                       <p className="text-lg font-bold text-neutral-900">${order.principal.toLocaleString()}</p>
@@ -243,6 +257,17 @@ export const LedgerDetail: React.FC = () => {
                         <option value="completed">Completed</option>
                         <option value="cancelled">Cancelled</option>
                       </select>
+
+                      {/* Payment Button */}
+                      {order.status !== 'completed' && order.status !== 'cancelled' && (
+                        <button 
+                          onClick={() => setSelectedOrderForPayment({ ...order, totalDue, currentPaid })}
+                          className="ml-2 p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors"
+                          title="Record Payment"
+                        >
+                          <DollarSign className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -460,6 +485,16 @@ export const LedgerDetail: React.FC = () => {
           onClose={() => setSelectedCustomerForOrder(null)} 
         />
       )}
+      {selectedOrderForPayment && id && (
+        <PaymentModal
+          ledgerId={id}
+          orderId={selectedOrderForPayment.id}
+          totalDue={selectedOrderForPayment.totalDue}
+          currentPaid={selectedOrderForPayment.currentPaid}
+          onClose={() => setSelectedOrderForPayment(null)}
+        />
+      )}
     </div>
   );
 };
+

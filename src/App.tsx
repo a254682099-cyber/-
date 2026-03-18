@@ -7,6 +7,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Auth } from './components/Auth';
 import { Dashboard } from './components/Dashboard';
 import { LedgerDetail } from './components/LedgerDetail';
+import { Reports } from './components/Reports';
 import { Layout } from './components/Layout';
 
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/ledger/:id" element={<LedgerDetail />} />
+              <Route path="/reports" element={<Reports />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>

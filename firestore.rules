@@ -20,14 +20,17 @@ service cloud.firestore {
     
     function isLedgerMember(ledgerId) {
       let ledger = getLedger(ledgerId);
-      return isAuthenticated() && (ledger.ownerUid == request.auth.uid || ledger.members.hasAny([{'uid': request.auth.uid, 'role': 'ledger_admin'}, {'uid': request.auth.uid, 'role': 'auditor'}, {'uid': request.auth.uid, 'role': 'collector'}, {'uid': request.auth.uid, 'role': 'readonly'}]));
+      return isAuthenticated() && (
+        ledger.ownerUid == request.auth.uid || 
+        request.auth.uid in ledger.memberUids
+      );
     }
 
     function hasLedgerRole(ledgerId, roles) {
       let ledger = getLedger(ledgerId);
       return isAuthenticated() && (
-        (ledger.ownerUid == request.auth.uid) ||
-        ledger.members.exists(m, m.uid == request.auth.uid && m.role in roles)
+        ledger.ownerUid == request.auth.uid ||
+        request.auth.uid in ledger.memberUids
       );
     }
 

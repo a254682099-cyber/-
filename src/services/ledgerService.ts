@@ -77,6 +77,7 @@ export const ledgerService = {
         name,
         ownerUid: auth.currentUser.uid,
         members: [],
+        memberUids: [auth.currentUser.uid],
         createdAt: new Date().toISOString()
       });
       await this.logAction(docRef.id, 'CREATE_LEDGER', docRef.id, '', name);
@@ -89,10 +90,10 @@ export const ledgerService = {
   subscribeToLedgers(callback: (ledgers: any[]) => void) {
     if (!auth.currentUser) return () => {};
     const path = 'ledgers';
-    // We should ideally query where ownerUid == uid OR members contains uid.
-    // Firestore requires separate queries or an 'in' array if we denormalize.
-    // For MVP, let's just fetch where ownerUid == uid.
-    const q = query(collection(db, path), where('ownerUid', '==', auth.currentUser.uid));
+    
+    // Subscribe to ledgers where user is in memberUids
+    const q = query(collection(db, path), where('memberUids', 'array-contains', auth.currentUser.uid));
+    
     return onSnapshot(q, (snapshot) => {
       const ledgers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       callback(ledgers);
@@ -137,7 +138,8 @@ export const ledgerService = {
       }
       
       const newMembers = [...members, { uid, role, email: userDoc.data().email, name: userDoc.data().displayName }];
-      await updateDoc(ledgerRef, { members: newMembers });
+      const newMemberUids = [...(ledgerSnap.data().memberUids || [ledgerSnap.data().ownerUid]), uid];
+      await updateDoc(ledgerRef, { members: newMembers, memberUids: newMemberUids });
       await this.logAction(ledgerId, 'ADD_MEMBER', uid, '', role);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
@@ -204,6 +206,17 @@ export const ledgerService = {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status: newStatus });
       await this.logAction(ledgerId, 'UPDATE_ORDER_STATUS', orderId, oldStatus, newStatus);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  async recordPayment(ledgerId: string, orderId: string, amount: number, currentPaid: number = 0) {
+    const path = `orders/${orderId}`;
+    try {
+      const newPaid = currentPaid + amount;
+      await updateDoc(doc(db, 'orders', orderId), { paidAmount: newPaid });
+      await this.logAction(ledgerId, 'RECORD_PAYMENT', orderId, currentPaid.toString(), newPaid.toString());
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
