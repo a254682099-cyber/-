@@ -59,7 +59,10 @@ export const Dashboard: React.FC = () => {
   };
 
   const totalCapital = allOrders.reduce((sum, order) => sum + (order.principal || 0), 0);
+  const totalInterest = allOrders.reduce((sum, order) => sum + ((order.principal || 0) * (order.interestRate || 0) / 100), 0);
+  const totalPaid = allOrders.reduce((sum, order) => sum + (order.paidAmount || 0), 0);
   const activeOrdersCount = allOrders.filter(o => o.status === 'active').length;
+  
   const pendingTasks = allOrders.filter(o => 
     o.status === 'pending_approval' || 
     o.status === 'overdue' || 
@@ -68,13 +71,30 @@ export const Dashboard: React.FC = () => {
 
   const stats = [
     { label: 'Total Capital', value: `$${totalCapital.toLocaleString()}`, icon: DollarSign, color: 'bg-blue-500' },
-    { label: 'Active Orders', value: activeOrdersCount.toString(), icon: TrendingUp, color: 'bg-emerald-500' },
-    { label: 'Total Customers', value: allCustomers.length.toString(), icon: Users, color: 'bg-purple-500' },
+    { label: 'Expected Interest', value: `$${totalInterest.toLocaleString()}`, icon: TrendingUp, color: 'bg-emerald-500' },
+    { label: 'Total Collected', value: `$${totalPaid.toLocaleString()}`, icon: CheckCircle2, color: 'bg-purple-500' },
     { label: 'Pending Tasks', value: pendingTasks.length.toString(), icon: Clock, color: 'bg-amber-500' },
   ];
 
   return (
     <div className="space-y-10">
+      {/* Welcome Section */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+          <h1 className="text-3xl font-bold text-neutral-900">Welcome back!</h1>
+          <p className="text-neutral-500 mt-1">Here's what's happening across your ledgers today.</p>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowNewLedger(true)}
+            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95"
+          >
+            <Plus className="w-5 h-5" />
+            New Ledger
+          </button>
+        </div>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, i) => (
@@ -83,9 +103,9 @@ export const Dashboard: React.FC = () => {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.1 }}
-            className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100 flex items-center gap-5"
+            className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100 flex items-center gap-5 group hover:shadow-md transition-all"
           >
-            <div className={`w-14 h-14 ${stat.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
+            <div className={`w-14 h-14 ${stat.color} rounded-2xl flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform`}>
               <stat.icon className="w-7 h-7" />
             </div>
             <div>
@@ -101,13 +121,6 @@ export const Dashboard: React.FC = () => {
         <section className="xl:col-span-2">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl font-bold text-neutral-900">Your Ledgers</h3>
-            <button
-              onClick={() => setShowNewLedger(true)}
-              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95"
-            >
-              <Plus className="w-5 h-5" />
-              New Ledger
-            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

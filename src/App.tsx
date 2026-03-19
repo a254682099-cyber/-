@@ -8,6 +8,7 @@ import { Auth } from './components/Auth';
 import { Dashboard } from './components/Dashboard';
 import { LedgerDetail } from './components/LedgerDetail';
 import { Reports } from './components/Reports';
+import { CustomerDetail } from './components/CustomerDetail';
 import { Layout } from './components/Layout';
 
 export default function App() {
@@ -55,6 +56,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/ledger/:id" element={<LedgerDetail />} />
+              <Route path="/ledger/:ledgerId/customer/:customerId" element={<CustomerDetail />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

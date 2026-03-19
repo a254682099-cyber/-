@@ -24,6 +24,7 @@ import { OrderForm } from './OrderForm';
 import { PaymentModal } from './PaymentModal';
 import { format } from 'date-fns';
 import { UserRole } from '../types';
+import { auth } from '../firebase';
 
 export const LedgerDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -44,6 +45,8 @@ export const LedgerDetail: React.FC = () => {
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<UserRole>('collector');
   const [isAddingMember, setIsAddingMember] = useState(false);
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [orderPayments, setOrderPayments] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -58,6 +61,24 @@ export const LedgerDetail: React.FC = () => {
       unsubLogs();
     };
   }, [id]);
+
+  // Subscribe to payments for expanded order
+  useEffect(() => {
+    if (!expandedOrder) return;
+    const unsub = ledgerService.subscribeToPayments(expandedOrder, (payments) => {
+      setOrderPayments(prev => ({ ...prev, [expandedOrder]: payments }));
+    });
+    return () => unsub();
+  }, [expandedOrder]);
+
+  const userRole = ledger?.ownerUid === auth.currentUser?.uid 
+    ? 'ledger_admin' 
+    : ledger?.members?.find((m: any) => m.uid === auth.currentUser?.uid)?.role || 'readonly';
+
+  const canManageMembers = userRole === 'ledger_admin';
+  const canCreateOrders = ['ledger_admin', 'auditor', 'collector'].includes(userRole);
+  const canApproveOrders = ['ledger_admin', 'auditor'].includes(userRole);
+  const canRecordPayments = ['ledger_admin', 'collector'].includes(userRole);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -81,12 +102,17 @@ export const LedgerDetail: React.FC = () => {
 
   const handleUpdateStatus = async (orderId: string, oldStatus: string, newStatus: string) => {
     if (!id) return;
+    if (!canApproveOrders && newStatus === 'active') {
+      alert('You do not have permission to approve orders.');
+      return;
+    }
     await ledgerService.updateOrderStatus(id, orderId, oldStatus, newStatus);
   };
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !newMemberEmail.trim()) return;
+    if (!canManageMembers) return;
     setIsAddingMember(true);
     try {
       await ledgerService.addMemberByEmail(id, newMemberEmail, newMemberRole);
@@ -95,6 +121,16 @@ export const LedgerDetail: React.FC = () => {
       alert(error.message || 'Failed to add member');
     } finally {
       setIsAddingMember(false);
+    }
+  };
+
+  const handleRemoveMember = async (uid: string) => {
+    if (!id || !canManageMembers) return;
+    if (!window.confirm('Are you sure you want to remove this member?')) return;
+    try {
+      await ledgerService.removeMember(id, uid);
+    } catch (error: any) {
+      alert(error.message || 'Failed to remove member');
     }
   };
 
@@ -120,17 +156,24 @@ export const LedgerDetail: React.FC = () => {
           </button>
           <div>
             <h2 className="text-2xl font-bold text-neutral-900">{ledger?.name || 'Loading...'}</h2>
-            <p className="text-sm text-neutral-500">Ledger Details</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-neutral-500">Ledger Details</p>
+              <span className="px-2 py-0.5 bg-neutral-100 text-neutral-600 rounded text-[10px] font-bold uppercase tracking-wider">
+                Role: {userRole.replace('_', ' ')}
+              </span>
+            </div>
           </div>
         </div>
         <div className="flex gap-4">
-          <button
-            onClick={() => setShowCustomerForm(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-semibold rounded-2xl transition-all shadow-sm"
-          >
-            <Plus className="w-5 h-5" />
-            New Customer
-          </button>
+          {canCreateOrders && (
+            <button
+              onClick={() => setShowCustomerForm(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-700 font-semibold rounded-2xl transition-all shadow-sm"
+            >
+              <Plus className="w-5 h-5" />
+              New Customer
+            </button>
+          )}
         </div>
       </div>
 
@@ -208,68 +251,123 @@ export const LedgerDetail: React.FC = () => {
               const totalDue = (order.principal || 0) + calculatedInterest;
               const currentPaid = order.paidAmount || 0;
               const progress = Math.min(100, Math.round((currentPaid / totalDue) * 100)) || 0;
+              const isExpanded = expandedOrder === order.id;
 
               return (
-                <div key={order.id} className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100 flex flex-col md:flex-row md:items-center justify-between gap-4 group hover:shadow-md transition-all">
-                  <div className="flex items-center gap-6 flex-1">
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${getStatusColor(order.status)} shrink-0`}>
-                      <StatusIcon className="w-7 h-7" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="text-lg font-bold text-neutral-900">{customer?.name || 'Unknown Customer'}</h4>
-                      <p className="text-sm text-neutral-500 flex items-center gap-2 mb-2">
-                        <Calendar className="w-4 h-4" />
-                        Due {format(new Date(order.dueDate), 'MMM dd, yyyy')}
-                      </p>
-                      {/* Progress Bar */}
-                      <div className="w-full max-w-xs bg-neutral-100 rounded-full h-2.5 mb-1">
-                        <div className="bg-emerald-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div>
+                <div key={order.id} className="bg-white rounded-3xl shadow-sm border border-neutral-100 overflow-hidden group hover:shadow-md transition-all">
+                  <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-6 flex-1">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${getStatusColor(order.status)} shrink-0`}>
+                        <StatusIcon className="w-7 h-7" />
                       </div>
-                      <p className="text-xs text-neutral-500 font-medium">
-                        Paid: ${currentPaid.toLocaleString()} / ${totalDue.toLocaleString()} ({progress}%)
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-6 md:gap-8">
-                    <div className="text-right">
-                      <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">Principal</p>
-                      <p className="text-lg font-bold text-neutral-900">${order.principal.toLocaleString()}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">Interest</p>
-                      <p className="text-lg font-bold text-emerald-600">+{order.interestRate}%</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest ${getStatusColor(order.status)}`}>
-                        {order.status.replace('_', ' ')}
-                      </div>
-                      
-                      {/* Status Actions */}
-                      <select 
-                        className="ml-2 bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2"
-                        value={order.status}
-                        onChange={(e) => handleUpdateStatus(order.id, order.status, e.target.value)}
-                      >
-                        <option value="pending_approval">Pending</option>
-                        <option value="active">Active</option>
-                        <option value="overdue">Overdue</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-
-                      {/* Payment Button */}
-                      {order.status !== 'completed' && order.status !== 'cancelled' && (
-                        <button 
-                          onClick={() => setSelectedOrderForPayment({ ...order, totalDue, currentPaid })}
-                          className="ml-2 p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors"
-                          title="Record Payment"
+                      <div className="flex-1">
+                        <h4 
+                          className="text-lg font-bold text-neutral-900 cursor-pointer hover:text-emerald-600 transition-colors"
+                          onClick={() => navigate(`/ledger/${id}/customer/${order.customerId}`)}
                         >
-                          <DollarSign className="w-5 h-5" />
+                          {customer?.name || 'Unknown Customer'}
+                        </h4>
+                        <p className="text-sm text-neutral-500 flex items-center gap-2 mb-2">
+                          <Calendar className="w-4 h-4" />
+                          Due {format(new Date(order.dueDate), 'MMM dd, yyyy')}
+                        </p>
+                        {/* Progress Bar */}
+                        <div className="w-full max-w-xs bg-neutral-100 rounded-full h-2.5 mb-1">
+                          <div className="bg-emerald-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div>
+                        </div>
+                        <p className="text-xs text-neutral-500 font-medium">
+                          Paid: ${currentPaid.toLocaleString()} / ${totalDue.toLocaleString()} ({progress}%)
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-6 md:gap-8">
+                      <div className="text-right">
+                        <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">Principal</p>
+                        <p className="text-lg font-bold text-neutral-900">${order.principal.toLocaleString()}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">Interest</p>
+                        <p className="text-lg font-bold text-emerald-600">+{order.interestRate}%</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest ${getStatusColor(order.status)}`}>
+                          {order.status.replace('_', ' ')}
+                        </div>
+                        
+                        {/* Status Actions */}
+                        <select 
+                          className="ml-2 bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2"
+                          value={order.status}
+                          disabled={!canApproveOrders && order.status === 'pending_approval'}
+                          onChange={(e) => handleUpdateStatus(order.id, order.status, e.target.value)}
+                        >
+                          <option value="pending_approval">Pending</option>
+                          <option value="active">Active</option>
+                          <option value="overdue">Overdue</option>
+                          <option value="completed">Completed</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
+
+                        {/* Payment Button */}
+                        {canRecordPayments && order.status !== 'completed' && order.status !== 'cancelled' && (
+                          <button 
+                            onClick={() => setSelectedOrderForPayment({ ...order, totalDue, currentPaid })}
+                            className="ml-2 p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors"
+                            title="Record Payment"
+                          >
+                            <DollarSign className="w-5 h-5" />
+                          </button>
+                        )}
+
+                        {/* Expand Button */}
+                        <button 
+                          onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
+                          className={`p-2 rounded-lg transition-colors ${isExpanded ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-400 hover:text-neutral-900'}`}
+                        >
+                          <History className="w-5 h-5" />
                         </button>
-                      )}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Expanded Payment History */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="bg-neutral-50 border-t border-neutral-100 overflow-hidden"
+                      >
+                        <div className="p-6">
+                          <h5 className="text-sm font-bold text-neutral-900 mb-4 flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-emerald-600" />
+                            Payment History
+                          </h5>
+                          <div className="space-y-3">
+                            {orderPayments[order.id]?.map((payment, pidx) => (
+                              <div key={pidx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-neutral-100">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
+                                    <DollarSign className="w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-bold text-neutral-900">${payment.amount.toLocaleString()}</p>
+                                    <p className="text-[10px] text-neutral-500">{format(new Date(payment.timestamp), 'MMM dd, yyyy HH:mm')}</p>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-mono text-neutral-400">UID: {payment.uid?.substring(0, 6)}</span>
+                              </div>
+                            ))}
+                            {(!orderPayments[order.id] || orderPayments[order.id].length === 0) && (
+                              <p className="text-xs text-neutral-400 italic">No payments recorded yet.</p>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}
@@ -290,23 +388,33 @@ export const LedgerDetail: React.FC = () => {
             {filteredCustomers.map((customer) => (
               <div key={customer.id} className="bg-white p-8 rounded-3xl shadow-sm border border-neutral-100 group hover:shadow-md transition-all">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="w-16 h-16 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
+                  <div 
+                    className="w-16 h-16 bg-neutral-100 rounded-2xl flex items-center justify-center text-neutral-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all cursor-pointer"
+                    onClick={() => navigate(`/ledger/${id}/customer/${customer.id}`)}
+                  >
                     <Users className="w-8 h-8" />
                   </div>
                   <button className="p-2 text-neutral-300 hover:text-neutral-900 transition-colors">
                     <MoreVertical className="w-6 h-6" />
                   </button>
                 </div>
-                <h4 className="text-xl font-bold text-neutral-900 mb-1">{customer.name}</h4>
+                <h4 
+                  className="text-xl font-bold text-neutral-900 mb-1 cursor-pointer hover:text-emerald-600 transition-colors"
+                  onClick={() => navigate(`/ledger/${id}/customer/${customer.id}`)}
+                >
+                  {customer.name}
+                </h4>
                 <p className="text-sm text-neutral-500 mb-6">{customer.phone || 'No phone provided'}</p>
                 
-                <button
-                  onClick={() => setSelectedCustomerForOrder(customer)}
-                  className="w-full py-3 px-4 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-                >
-                  <DollarSign className="w-5 h-5" />
-                  Create Loan
-                </button>
+                {canCreateOrders && (
+                  <button
+                    onClick={() => setSelectedCustomerForOrder(customer)}
+                    className="w-full py-3 px-4 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <DollarSign className="w-5 h-5" />
+                    Create Loan
+                  </button>
+                )}
               </div>
             ))}
             {filteredCustomers.length === 0 && (
@@ -324,45 +432,47 @@ export const LedgerDetail: React.FC = () => {
             className="space-y-6"
           >
             {/* Add Member Form */}
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100">
-              <h3 className="text-lg font-bold text-neutral-900 mb-4 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-emerald-600" />
-                Add New Member
-              </h3>
-              <form onSubmit={handleAddMember} className="flex flex-wrap gap-4 items-end">
-                <div className="flex-1 min-w-[200px]">
-                  <label className="block text-sm font-semibold text-neutral-700 mb-2">User Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={newMemberEmail}
-                    onChange={(e) => setNewMemberEmail(e.target.value)}
-                    placeholder="colleague@example.com"
-                    className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="w-48">
-                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Role</label>
-                  <select
-                    value={newMemberRole}
-                    onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
-                    className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all bg-white"
+            {canManageMembers && (
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100">
+                <h3 className="text-lg font-bold text-neutral-900 mb-4 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-emerald-600" />
+                  Add New Member
+                </h3>
+                <form onSubmit={handleAddMember} className="flex flex-wrap gap-4 items-end">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="block text-sm font-semibold text-neutral-700 mb-2">User Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={newMemberEmail}
+                      onChange={(e) => setNewMemberEmail(e.target.value)}
+                      placeholder="colleague@example.com"
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="w-48">
+                    <label className="block text-sm font-semibold text-neutral-700 mb-2">Role</label>
+                    <select
+                      value={newMemberRole}
+                      onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
+                      className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all bg-white"
+                    >
+                      <option value="ledger_admin">Ledger Admin</option>
+                      <option value="auditor">Auditor</option>
+                      <option value="collector">Collector</option>
+                      <option value="readonly">Read Only</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isAddingMember}
+                    className="py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-all shadow-lg disabled:opacity-50"
                   >
-                    <option value="ledger_admin">Ledger Admin</option>
-                    <option value="auditor">Auditor</option>
-                    <option value="collector">Collector</option>
-                    <option value="readonly">Read Only</option>
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  disabled={isAddingMember}
-                  className="py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-all shadow-lg disabled:opacity-50"
-                >
-                  {isAddingMember ? 'Adding...' : 'Add Member'}
-                </button>
-              </form>
-            </div>
+                    {isAddingMember ? 'Adding...' : 'Add Member'}
+                  </button>
+                </form>
+              </div>
+            )}
 
             {/* Members List */}
             <div className="bg-white rounded-3xl shadow-sm border border-neutral-100 overflow-hidden">
@@ -403,9 +513,14 @@ export const LedgerDetail: React.FC = () => {
                         </span>
                       </td>
                       <td className="p-4 text-right">
-                        <button className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors">
-                          Remove
-                        </button>
+                        {canManageMembers && (
+                          <button 
+                            onClick={() => handleRemoveMember(member.uid)}
+                            className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors"
+                          >
+                            Remove
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

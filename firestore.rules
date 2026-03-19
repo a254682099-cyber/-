@@ -30,7 +30,7 @@ service cloud.firestore {
       let ledger = getLedger(ledgerId);
       return isAuthenticated() && (
         ledger.ownerUid == request.auth.uid ||
-        request.auth.uid in ledger.memberUids
+        (request.auth.uid in ledger.roles && ledger.roles[request.auth.uid] in roles)
       );
     }
 
@@ -46,7 +46,8 @@ service cloud.firestore {
     match /ledgers/{ledgerId} {
       allow read: if isSuperAdmin() || isLedgerMember(ledgerId);
       allow create: if isAuthenticated();
-      allow update, delete: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
+      allow update: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
+      allow delete: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
     }
 
     match /customers/{customerId} {
@@ -61,6 +62,16 @@ service cloud.firestore {
       allow create: if isAuthenticated() && hasLedgerRole(request.resource.data.ledgerId, ['ledger_admin', 'collector']);
       allow update: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin', 'auditor', 'collector']));
       allow delete: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin']));
+
+      match /payments/{paymentId} {
+        allow read: if isSuperAdmin() || isLedgerMember(getLedgerIdFromOrder(orderId));
+        allow create: if isAuthenticated() && hasLedgerRole(getLedgerIdFromOrder(orderId), ['ledger_admin', 'collector']);
+        allow update, delete: if false; // Payments are immutable
+      }
+    }
+
+    function getLedgerIdFromOrder(orderId) {
+      return get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId;
     }
 
     match /auditLogs/{logId} {

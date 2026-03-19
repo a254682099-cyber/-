@@ -60,6 +60,14 @@ export interface AuditLog {
   timestamp: string;
 }
 
+export interface Payment {
+  id: string;
+  orderId: string;
+  amount: number;
+  timestamp: string;
+  uid: string;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

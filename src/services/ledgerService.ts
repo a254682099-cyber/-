@@ -78,6 +78,7 @@ export const ledgerService = {
         ownerUid: auth.currentUser.uid,
         members: [],
         memberUids: [auth.currentUser.uid],
+        roles: { [auth.currentUser.uid]: 'ledger_admin' },
         createdAt: new Date().toISOString()
       });
       await this.logAction(docRef.id, 'CREATE_LEDGER', docRef.id, '', name);
@@ -139,8 +140,38 @@ export const ledgerService = {
       
       const newMembers = [...members, { uid, role, email: userDoc.data().email, name: userDoc.data().displayName }];
       const newMemberUids = [...(ledgerSnap.data().memberUids || [ledgerSnap.data().ownerUid]), uid];
-      await updateDoc(ledgerRef, { members: newMembers, memberUids: newMemberUids });
+      const newRoles = { ...(ledgerSnap.data().roles || {}), [uid]: role };
+      
+      await updateDoc(ledgerRef, { 
+        members: newMembers, 
+        memberUids: newMemberUids,
+        roles: newRoles
+      });
       await this.logAction(ledgerId, 'ADD_MEMBER', uid, '', role);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  async removeMember(ledgerId: string, uid: string) {
+    const path = `ledgers/${ledgerId}`;
+    try {
+      const ledgerRef = doc(db, 'ledgers', ledgerId);
+      const ledgerSnap = await getDoc(ledgerRef);
+      if (!ledgerSnap.exists()) throw new Error('Ledger not found');
+      
+      const members = ledgerSnap.data().members || [];
+      const newMembers = members.filter((m: any) => m.uid !== uid);
+      const newMemberUids = (ledgerSnap.data().memberUids || []).filter((id: string) => id !== uid);
+      const newRoles = { ...(ledgerSnap.data().roles || {}) };
+      delete newRoles[uid];
+      
+      await updateDoc(ledgerRef, { 
+        members: newMembers, 
+        memberUids: newMemberUids,
+        roles: newRoles
+      });
+      await this.logAction(ledgerId, 'REMOVE_MEMBER', uid, '', '');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -171,6 +202,26 @@ export const ledgerService = {
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
+  },
+
+  async updateCustomer(ledgerId: string, customerId: string, data: any) {
+    const path = `customers/${customerId}`;
+    try {
+      await updateDoc(doc(db, 'customers', customerId), data);
+      await this.logAction(ledgerId, 'UPDATE_CUSTOMER', customerId, '', data.name);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  async deleteCustomer(ledgerId: string, customerId: string) {
+    const path = `customers/${customerId}`;
+    try {
+      await deleteDoc(doc(db, 'customers', customerId));
+      await this.logAction(ledgerId, 'DELETE_CUSTOMER', customerId, '', '');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
   },
 
   // Orders
@@ -216,9 +267,29 @@ export const ledgerService = {
     try {
       const newPaid = currentPaid + amount;
       await updateDoc(doc(db, 'orders', orderId), { paidAmount: newPaid });
+      
+      // Add to payments subcollection
+      const paymentsRef = collection(db, `orders/${orderId}/payments`);
+      await addDoc(paymentsRef, {
+        amount,
+        timestamp: new Date().toISOString(),
+        uid: auth.currentUser?.uid,
+      });
+
       await this.logAction(ledgerId, 'RECORD_PAYMENT', orderId, currentPaid.toString(), newPaid.toString());
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
+  },
+
+  subscribeToPayments(orderId: string, callback: (payments: any[]) => void) {
+    const path = `orders/${orderId}/payments`;
+    const q = query(collection(db, path), orderBy('timestamp', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      const payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(payments);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
   }
 };
