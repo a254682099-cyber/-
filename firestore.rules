@@ -1,186 +1,173 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: uid
-    // Fields:
-    //   - uid: string (required)
-    //   - email: string (required, email format)
-    //   - displayName: string (optional)
-    //   - role: string (required, enum: [super_admin, ledger_admin, auditor, collector, readonly])
-    //   - createdAt: string (required, ISO 8601)
-    //
-    // Collection: ledgers
-    // Document ID: auto-generated
-    // Fields:
-    //   - name: string (required)
-    //   - ownerUid: string (required, immutable)
-    //   - members: list of objects (optional)
-    //   - memberUids: list of strings (required)
-    //   - roles: map of uid -> role (required)
-    //   - createdAt: string (required, ISO 8601)
-    //
-    // Collection: customers
-    // Document ID: auto-generated
-    // Fields:
-    //   - ledgerId: string (required, immutable)
-    //   - name: string (required)
-    //   - phone: string (optional)
-    //   - idCard: string (optional)
-    //   - photoUrl: string (optional)
-    //   - createdAt: string (required, ISO 8601)
-    //
-    // Collection: orders
-    // Document ID: auto-generated
-    // Fields:
-    //   - ledgerId: string (required, immutable)
-    //   - customerId: string (required, immutable)
-    //   - principal: number (required, positive)
-    //   - interestRate: number (required, positive)
-    //   - termDays: integer (required, positive)
-    //   - startDate: string (required, ISO 8601)
-    //   - dueDate: string (required, ISO 8601)
-    //   - status: string (required, enum: [pending_approval, active, overdue, completed, cancelled])
-    //   - collectorUid: string (optional)
-    //   - notes: string (optional)
-    //   - createdAt: string (required, ISO 8601)
-    //
-    // Collection: notifications
-    // Document ID: auto-generated
-    // Fields:
-    //   - uid: string (required, owner)
-    //   - ledgerId: string (required)
-    //   - title: string (required)
-    //   - message: string (required)
-    //   - type: string (required, enum: [info, success, warning, error])
-    //   - read: bool (required)
-    //   - timestamp: string (required, ISO 8601)
-    //
-    // Collection: auditLogs
-    // Document ID: auto-generated
-    // Fields:
-    //   - ledgerId: string (required)
-    //   - uid: string (required)
-    //   - action: string (required)
-    //   - targetId: string (required)
-    //   - oldValue: string (optional)
-    //   - newValue: string (optional)
-    //   - timestamp: string (required, ISO 8601)
-    //
-    // ===============================================================
-
+    
     // ===============================================================
     // Helper Functions
     // ===============================================================
+    
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function isSuperAdmin() {
+
+    // Check if the user is a system member (logged in via anonymous auth but has a user doc)
+    function isSystemMember() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' ||
-         (request.auth.token.email == "a254682099@gmail.com" && request.auth.token.email_verified == true));
-    }
-    
-    function getLedger(ledgerId) {
-      return get(/databases/$(database)/documents/ledgers/$(ledgerId)).data;
-    }
-    
-    function isLedgerMember(ledgerId) {
-      let ledger = getLedger(ledgerId);
-      return isAuthenticated() && (
-        ledger.ownerUid == request.auth.uid || 
-        request.auth.uid in ledger.memberUids
-      );
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSystemMember == true;
     }
 
-    function hasLedgerRole(ledgerId, roles) {
-      let ledger = getLedger(ledgerId);
-      return isAuthenticated() && (
-        ledger.ownerUid == request.auth.uid ||
-        (request.auth.uid in ledger.roles && ledger.roles[request.auth.uid] in roles)
-      );
+    // Get the user's role from their user document safely
+    function getUserRole() {
+      return (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))) 
+             ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role 
+             : null;
     }
 
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    // Check if the user has a specific role
+    function hasRole(role) {
+      return getUserRole() == role;
     }
 
-    function isValidUrl(url) {
-      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    // Check if the user is an admin or super_admin
+    function isAdmin() {
+      return hasRole('admin') || hasRole('super_admin');
     }
 
-    function isValidDateString(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    // Check if the user has access to a specific ledger via accessibleLedgerIds
+    function hasLedgerAccess(ledgerId) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.keys().hasAll(['accessibleLedgerIds']) && 
+             ledgerId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessibleLedgerIds;
+    }
+
+    // Check if the user is a member of the ledger document being evaluated (for ledgers collection)
+    function isMemberOfThisLedger() {
+      return isAuthenticated() && 
+             (resource.data.ownerUid == request.auth.uid || 
+              (resource.data.keys().hasAll(['memberUids']) && request.auth.uid in resource.data.memberUids));
+    }
+
+    // Check if the user is a member of a specific ledger ID (for sub-resources)
+    function isMemberOfLedgerId(ledgerId) {
+      let ledger = get(/databases/$(database)/documents/ledgers/$(ledgerId)).data;
+      return isAuthenticated() && 
+             (ledger.ownerUid == request.auth.uid || 
+              (ledger.keys().hasAll(['memberUids']) && request.auth.uid in ledger.memberUids));
+    }
+
+    // Check if the user has read access to the ledger document itself
+    function canReadThisLedger(ledgerId) {
+      return isAdmin() || isMemberOfThisLedger() || hasLedgerAccess(ledgerId);
+    }
+
+    // Check if the user has write access to the ledger document itself
+    function canWriteThisLedger(ledgerId) {
+      return isAdmin() || isMemberOfThisLedger() || hasLedgerAccess(ledgerId);
+    }
+
+    // Check if the user has read access to a ledger's data (customers, orders, etc.)
+    function canReadLedgerData(ledgerId) {
+      return isAdmin() || isMemberOfLedgerId(ledgerId) || hasLedgerAccess(ledgerId);
+    }
+
+    // Check if the user has write access to a ledger's data (customers, orders, etc.)
+    function canWriteLedgerData(ledgerId) {
+      return isAdmin() || isMemberOfLedgerId(ledgerId) || hasLedgerAccess(ledgerId);
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
 
-    match /users/{uid} {
-      allow read: if isAuthenticated(); // Needed for searching users by email to add to ledger
-      allow write: if isSuperAdmin() || (isAuthenticated() && request.auth.uid == uid);
+    // Users Collection
+    match /users/{userId} {
+      // Anyone can read user profiles (needed for display names)
+      allow read: if isAuthenticated();
+      
+      // Users can update their own profile, but cannot change their role unless they are an admin
+      // The default admin email can bootstrap their own admin role
+      allow create: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && (
+          // If they are not an admin, they cannot create an admin role
+          (!('role' in request.resource.data) || request.resource.data.role != 'admin' && request.resource.data.role != 'super_admin') ||
+          // Allow the default admin email to bootstrap their role
+          (request.auth.token.email == 'a254682099@gmail.com' && request.auth.token.email_verified == true)
+        ))
+      );
+      
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && (
+          // If they are not an admin, they cannot change their role
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) ||
+          // Allow the default admin email to bootstrap their role
+          (request.auth.token.email == 'a254682099@gmail.com' && request.auth.token.email_verified == true)
+        ))
+      );
+      
+      allow delete: if isAdmin();
     }
 
+    // System Members Collection (managed by admins)
+    match /systemMembers/{memberId} {
+      // Admins can do anything. System members can read their own data (though they usually read from users collection)
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Ledgers Collection
     match /ledgers/{ledgerId} {
-      allow read: if isSuperAdmin() || isLedgerMember(ledgerId);
-      allow create: if isAuthenticated();
-      allow update: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
-      allow delete: if isSuperAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
+      allow read: if canReadThisLedger(ledgerId);
+      allow create: if isAuthenticated(); // Anyone can create a ledger
+      allow update: if canWriteThisLedger(ledgerId);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
     }
 
+    // Customers Collection
     match /customers/{customerId} {
-      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
-      allow create: if isAuthenticated() && hasLedgerRole(request.resource.data.ledgerId, ['ledger_admin', 'collector']);
-      allow update: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin', 'collector']));
-      allow delete: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin']));
+      allow read: if canReadLedgerData(resource.data.ledgerId);
+      allow create: if canWriteLedgerData(request.resource.data.ledgerId);
+      allow update, delete: if canWriteLedgerData(resource.data.ledgerId);
     }
 
+    // Orders Collection
     match /orders/{orderId} {
-      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
-      allow create: if isAuthenticated() && hasLedgerRole(request.resource.data.ledgerId, ['ledger_admin', 'collector']);
-      allow update: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin', 'auditor', 'collector']));
-      allow delete: if isSuperAdmin() || (isAuthenticated() && hasLedgerRole(resource.data.ledgerId, ['ledger_admin']));
-
+      allow read: if canReadLedgerData(resource.data.ledgerId);
+      allow create: if canWriteLedgerData(request.resource.data.ledgerId);
+      allow update, delete: if canWriteLedgerData(resource.data.ledgerId);
+      
+      // Payments Subcollection
       match /payments/{paymentId} {
-        allow read: if isSuperAdmin() || isLedgerMember(getLedgerIdFromOrder(orderId));
-        allow create: if isAuthenticated() && hasLedgerRole(getLedgerIdFromOrder(orderId), ['ledger_admin', 'collector']);
-        allow update, delete: if false; // Payments are immutable
+        allow read: if canReadLedgerData(get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId);
+        allow create: if canWriteLedgerData(get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId);
+        allow update, delete: if canWriteLedgerData(get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId);
       }
     }
 
-    function getLedgerIdFromOrder(orderId) {
-      return get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId;
+    // Collection Tasks
+    match /collectionTasks/{taskId} {
+      allow read: if canReadLedgerData(resource.data.ledgerId);
+      allow create: if canWriteLedgerData(request.resource.data.ledgerId);
+      allow update, delete: if canWriteLedgerData(resource.data.ledgerId);
     }
 
-    function isValidNotification(data) {
-      return data.uid is string &&
-             data.ledgerId is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.message is string && data.message.size() > 0 && data.message.size() < 1000 &&
-             data.type in ['info', 'success', 'warning', 'error'] &&
-             data.read is bool &&
-             data.timestamp is string;
-    }
-
+    // Notifications
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
-      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && 
-                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
-                    request.resource.data.read is bool;
-      allow delete: if false;
+      // Users can only read and update their own notifications
+      allow read, update: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      // System can create notifications for anyone
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
 
+    // Audit Logs
     match /auditLogs/{logId} {
-      allow read: if isSuperAdmin() || isLedgerMember(resource.data.ledgerId);
-      allow create: if isAuthenticated(); // Application logic should handle this
-      allow update, delete: if false; // Audit logs are immutable
+      allow read: if canReadLedgerData(resource.data.ledgerId);
+      allow create: if isAuthenticated(); // Anyone can create an audit log
+      allow update, delete: if false; // Audit logs should be immutable
     }
   }
 }

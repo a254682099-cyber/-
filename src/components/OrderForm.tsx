@@ -14,6 +14,7 @@ interface OrderFormProps {
 export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, customerName, onClose }) => {
   const [principal, setPrincipal] = useState('');
   const [interestRate, setInterestRate] = useState('5'); // 5% default
+  const [interestInterval, setInterestInterval] = useState<'daily' | 'weekly' | 'monthly' | 'once'>('daily');
   const [termDays, setTermDays] = useState('30'); // 30 days default
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [loading, setLoading] = useState(false);
@@ -29,10 +30,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
         customerId,
         principal: parseFloat(principal),
         interestRate: parseFloat(interestRate),
+        interestInterval,
         termDays: parseInt(termDays),
         startDate: start.toISOString(),
         dueDate: due.toISOString(),
-        notes: ''
+        notes: []
       });
       onClose();
     } catch (error) {
@@ -102,17 +104,32 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
             </div>
 
             <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-2">期限（天）</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    required
-                    value={termDays}
-                    onChange={(e) => setTermDays(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                  />
-                  <Clock className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">利息间隔</label>
+                  <select
+                    value={interestInterval}
+                    onChange={(e) => setInterestInterval(e.target.value as any)}
+                    className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-white"
+                  >
+                    <option value="daily">每天</option>
+                    <option value="weekly">每周</option>
+                    <option value="monthly">每月</option>
+                    <option value="once">到期</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">期限（天）</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      required
+                      value={termDays}
+                      onChange={(e) => setTermDays(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <Clock className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
+                  </div>
                 </div>
               </div>
 

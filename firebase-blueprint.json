@@ -60,6 +60,7 @@
         "customerId": { "type": "string" },
         "principal": { "type": "number" },
         "interestRate": { "type": "number" },
+        "interestInterval": { "type": "string", "enum": ["daily", "weekly", "monthly", "once"] },
         "termDays": { "type": "integer" },
         "startDate": { "type": "string", "format": "date-time" },
         "dueDate": { "type": "string", "format": "date-time" },
@@ -101,6 +102,51 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "ledgerId", "title", "message", "type", "read", "timestamp"]
+    },
+    "CollectionTask": {
+      "title": "Collection Task",
+      "description": "A specific instance of a collection task (principal or interest) with a temporary status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "type": { "type": "string", "enum": ["principal", "interest"] },
+        "status": { "type": "string", "enum": ["pending", "notified", "collected", "other"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "ledgerId", "date", "type", "status"]
+    },
+    "SystemMember": {
+      "title": "System Member",
+      "description": "Global members who can access multiple ledgers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "accessibleLedgerIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "name", "role", "accessibleLedgerIds"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "A payment record for an order.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["interest", "principal"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" },
+        "userName": { "type": "string" }
+      },
+      "required": ["orderId", "ledgerId", "amount", "type", "timestamp", "uid"]
     }
   },
   "firestore": {
@@ -109,6 +155,9 @@
     "/customers/{customerId}": { "schema": "Customer", "description": "Customers" },
     "/orders/{orderId}": { "schema": "Order", "description": "Orders" },
     "/auditLogs/{logId}": { "schema": "AuditLog", "description": "Audit logs" },
-    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications" }
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications" },
+    "/collectionTasks/{taskId}": { "schema": "CollectionTask", "description": "Collection tasks with temporary statuses" },
+    "/systemMembers/{memberId}": { "schema": "SystemMember", "description": "Global system members" },
+    "/payments/{paymentId}": { "schema": "Payment", "description": "Payment records" }
   }
 }

@@ -6,8 +6,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { format, isPast, isToday, startOfMonth, endOfMonth } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { auth } from '../firebase';
+import { User } from '../types';
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+  userProfile: User | null;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ userProfile }) => {
   const navigate = useNavigate();
   const [ledgers, setLedgers] = useState<any[]>([]);
   const [showNewLedger, setShowNewLedger] = useState(false);
@@ -22,39 +27,39 @@ export const Dashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    const unsubscribe = ledgerService.subscribeToLedgers(setLedgers);
+    const unsubscribe = ledgerService.subscribeToLedgers(setLedgers, userProfile);
     return () => unsubscribe();
-  }, []);
+  }, [userProfile]);
 
   useEffect(() => {
-    // Subscribe to orders and customers for all ledgers
-    const unsubscribes: (() => void)[] = [];
+    const unsubscribes: { [key: string]: () => void } = {};
     
-    const fetchAggregatedData = () => {
-      let tempOrders: any[] = [];
-      let tempCustomers: any[] = [];
+    // Reset state when ledgers change to prevent stale data from removed ledgers
+    setAllOrders([]);
+    setAllCustomers([]);
+    
+    // We'll use a functional state update to avoid depending on allOrders/allCustomers
+    ledgers.forEach(ledger => {
+      const orderSubId = `orders_${ledger.id}`;
+      const customerSubId = `customers_${ledger.id}`;
       
-      ledgers.forEach(ledger => {
-        const unsubOrders = ledgerService.subscribeToOrders(ledger.id, (orders) => {
-          tempOrders = [...tempOrders.filter(o => o.ledgerId !== ledger.id), ...orders];
-          setAllOrders([...tempOrders]);
+      unsubscribes[orderSubId] = ledgerService.subscribeToOrders(ledger.id, (orders) => {
+        setAllOrders(prev => {
+          const filtered = prev.filter(o => o.ledgerId !== ledger.id);
+          return [...filtered, ...orders];
         });
-        
-        const unsubCustomers = ledgerService.subscribeToCustomers(ledger.id, (customers) => {
-          tempCustomers = [...tempCustomers.filter(c => c.ledgerId !== ledger.id), ...customers];
-          setAllCustomers([...tempCustomers]);
-        });
-        
-        unsubscribes.push(unsubOrders, unsubCustomers);
       });
-    };
-
-    if (ledgers.length > 0) {
-      fetchAggregatedData();
-    }
+      
+      unsubscribes[customerSubId] = ledgerService.subscribeToCustomers(ledger.id, (customers) => {
+        setAllCustomers(prev => {
+          const filtered = prev.filter(c => c.ledgerId !== ledger.id);
+          return [...filtered, ...customers];
+        });
+      });
+    });
 
     return () => {
-      unsubscribes.forEach(unsub => unsub());
+      Object.values(unsubscribes).forEach(unsub => unsub());
     };
   }, [ledgers]);
 
@@ -79,36 +84,40 @@ export const Dashboard: React.FC = () => {
     setDeletingLedger(null);
   };
 
-  const totalCapital = allOrders.reduce((sum, order) => sum + (order.principal || 0), 0);
-  const totalInterest = allOrders.reduce((sum, order) => sum + ((order.principal || 0) * (order.interestRate || 0) / 100), 0);
-  const totalPaid = allOrders.reduce((sum, order) => sum + (order.paidAmount || 0), 0);
-  const activeOrdersCount = allOrders.filter(o => o.status === 'active').length;
-  
-  const pendingTasks = allOrders.filter(o => 
-    o.status === 'pending_approval' || 
-    o.status === 'overdue' || 
-    (o.status === 'active' && (isPast(new Date(o.dueDate)) || isToday(new Date(o.dueDate))))
-  ).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  const { totalCapital, totalInterest, totalPaid, activeOrdersCount, pendingTasks, monthlyStats, stats } = React.useMemo(() => {
+    const totalCapital = allOrders.reduce((sum, order) => sum + (order.principal || 0), 0);
+    const totalInterest = allOrders.reduce((sum, order) => sum + ((order.principal || 0) * (order.interestRate || 0) / 100), 0);
+    const totalPaid = allOrders.reduce((sum, order) => sum + (order.paidAmount || 0), 0);
+    const activeOrdersCount = allOrders.filter(o => o.status === 'active').length;
+    
+    const pendingTasks = allOrders.filter(o => 
+      o.status === 'pending_approval' || 
+      o.status === 'overdue' || 
+      (o.status === 'active' && (isPast(new Date(o.dueDate)) || isToday(new Date(o.dueDate))))
+    ).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
-  const monthlyStats = [
-    { name: '已放款', value: allOrders.filter(o => {
-      const d = new Date(o.createdAt);
-      return d >= startOfMonth(new Date()) && d <= endOfMonth(new Date());
-    }).reduce((sum, o) => sum + (o.principal || 0), 0) },
-    { name: '已收回', value: allOrders.reduce((sum, o) => {
-      // This is a bit complex since payments are in subcollections. 
-      // For dashboard quick stats, let's just use the paidAmount field which we update.
-      return sum + (o.paidAmount || 0);
-    }, 0) },
-    { name: '利息', value: totalInterest }
-  ];
+    const monthlyStats = [
+      { name: '已放款', value: allOrders.filter(o => {
+        const d = new Date(o.createdAt);
+        return d >= startOfMonth(new Date()) && d <= endOfMonth(new Date());
+      }).reduce((sum, o) => sum + (o.principal || 0), 0) },
+      { name: '已收回', value: allOrders.reduce((sum, o) => {
+        // This is a bit complex since payments are in subcollections. 
+        // For dashboard quick stats, let's just use the paidAmount field which we update.
+        return sum + (o.paidAmount || 0);
+      }, 0) },
+      { name: '利息', value: totalInterest }
+    ];
 
-  const stats = [
-    { label: '总本金', value: `$${totalCapital.toLocaleString()}`, icon: DollarSign, color: 'bg-blue-500' },
-    { label: '预期利息', value: `$${totalInterest.toLocaleString()}`, icon: TrendingUp, color: 'bg-emerald-500' },
-    { label: '总收回', value: `$${totalPaid.toLocaleString()}`, icon: CheckCircle2, color: 'bg-purple-500' },
-    { label: '待处理任务', value: pendingTasks.length.toString(), icon: Clock, color: 'bg-amber-500' },
-  ];
+    const stats = [
+      { label: '总本金', value: `$${totalCapital.toLocaleString()}`, icon: DollarSign, color: 'bg-blue-500' },
+      { label: '预期利息', value: `$${totalInterest.toLocaleString()}`, icon: TrendingUp, color: 'bg-emerald-500' },
+      { label: '总收回', value: `$${totalPaid.toLocaleString()}`, icon: CheckCircle2, color: 'bg-purple-500' },
+      { label: '待处理任务', value: pendingTasks.length.toString(), icon: Clock, color: 'bg-amber-500' },
+    ];
+
+    return { totalCapital, totalInterest, totalPaid, activeOrdersCount, pendingTasks, monthlyStats, stats };
+  }, [allOrders]);
 
   const searchResults = searchTerm.trim() ? {
     customers: allCustomers.filter(c => 

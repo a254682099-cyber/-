@@ -17,31 +17,132 @@ import {
   Shield,
   History,
   UserPlus,
-  Trash2
+  Trash2,
+  Phone,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CustomerForm } from './CustomerForm';
 import { OrderForm } from './OrderForm';
 import { PaymentModal } from './PaymentModal';
-import { format } from 'date-fns';
-import { UserRole } from '../types';
+import { format, isToday, isPast } from 'date-fns';
+import { User, UserRole } from '../types';
 import { auth } from '../firebase';
+import { playSound, triggerVibration } from '../utils/feedback';
 
-export const LedgerDetail: React.FC = () => {
+interface LedgerDetailProps {
+  userProfile: User | null;
+}
+
+export const LedgerDetail: React.FC<LedgerDetailProps> = ({ userProfile }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'orders' | 'customers' | 'members' | 'logs'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'tasks' | 'customers' | 'members' | 'logs'>('orders');
   
   const [ledger, setLedger] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
+  const [collectionTasks, setCollectionTasks] = useState<any[]>([]);
   
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [selectedCustomerForOrder, setSelectedCustomerForOrder] = useState<any | null>(null);
-  const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<any | null>(null);
+  const [selectedOrderForPayment, setSelectedOrderForPayment] = useState<{
+    id: string;
+    totalDue: number;
+    currentPaid: number;
+    type: 'interest' | 'principal';
+  } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!id || !userProfile) return;
+
+    const checkAccess = () => {
+      if (userProfile.role === 'admin' || userProfile.role === 'super_admin') {
+        setHasAccess(true);
+        return;
+      }
+      if (userProfile.role === 'staff') {
+        setHasAccess(userProfile.accessibleLedgerIds?.includes(id) || false);
+        return;
+      }
+      // For regular users, we'll check via the ledger document's memberUids in the subscription
+      setHasAccess(null); // Wait for ledger data
+    };
+
+    checkAccess();
+  }, [id, userProfile]);
+
+  // Tasks logic
+  const dailyTasks = React.useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const tasks: any[] = [];
+    const now = new Date();
+    
+    // Create maps for O(1) lookups
+    const customerMap = new Map(customers.map(c => [c.id, c]));
+    const taskMap = new Map(collectionTasks.map(t => [t.id, t]));
+
+    orders.forEach(order => {
+      if (order.status !== 'active' && order.status !== 'overdue') return;
+      
+      const dueDate = new Date(order.dueDate);
+      const startDate = new Date(order.startDate);
+      const interval = order.interestInterval || 'daily';
+      
+      let isInterestDue = false;
+      if (interval === 'daily') {
+        isInterestDue = true;
+      } else if (interval === 'weekly') {
+        const diffDays = Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays % 7 === 0) isInterestDue = true;
+      } else if (interval === 'monthly') {
+        if (now.getDate() === startDate.getDate()) isInterestDue = true;
+      }
+
+      const isPrincipalDue = isToday(dueDate) || isPast(dueDate);
+      const customer = customerMap.get(order.customerId);
+
+      if (isPrincipalDue) {
+        const taskId = `${order.id}_${today}_principal`;
+        const taskData = taskMap.get(taskId);
+        tasks.push({
+          id: taskId,
+          orderId: order.id,
+          customerId: order.customerId,
+          customerName: customer?.name || '未知',
+          customerPhone: customer?.phone,
+          type: 'principal',
+          amount: order.principal,
+          message: isToday(dueDate) ? '今日到期，请催收全额本金' : '已逾期，请催收全额本金',
+          isOverdue: isPast(dueDate) && !isToday(dueDate),
+          status: taskData?.status || 'pending'
+        });
+      } else if (isInterestDue) {
+        const taskId = `${order.id}_${today}_interest`;
+        const taskData = taskMap.get(taskId);
+        const interestAmount = (order.principal * order.interestRate) / 100;
+        tasks.push({
+          id: taskId,
+          orderId: order.id,
+          customerId: order.customerId,
+          customerName: customer?.name || '未知',
+          customerPhone: customer?.phone,
+          type: 'interest',
+          amount: interestAmount,
+          message: `今日需催收利息 (${interval === 'daily' ? '每日' : interval === 'weekly' ? '每周' : '每月'})`,
+          isOverdue: false,
+          status: taskData?.status || 'pending'
+        });
+      }
+    });
+
+    return tasks;
+  }, [orders, customers, collectionTasks]);
 
   // Add Member State
   const [newMemberEmail, setNewMemberEmail] = useState('');
@@ -51,18 +152,35 @@ export const LedgerDetail: React.FC = () => {
   const [orderPayments, setOrderPayments] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
-    if (!id) return;
-    const unsubLedger = ledgerService.subscribeToLedger(id, setLedger);
+    if (!id || hasAccess === false) return;
+    
+    const unsubLedger = ledgerService.subscribeToLedger(id, (data) => {
+      setLedger(data);
+      // If regular user, check if they are in memberUids
+      if (userProfile?.role !== 'admin' && userProfile?.role !== 'super_admin' && userProfile?.role !== 'staff') {
+        const isMember = data.memberUids?.includes(auth.currentUser?.uid) || data.ownerUid === auth.currentUser?.uid;
+        setHasAccess(isMember);
+      }
+    });
     const unsubCustomers = ledgerService.subscribeToCustomers(id, setCustomers);
     const unsubOrders = ledgerService.subscribeToOrders(id, setOrders);
     const unsubLogs = ledgerService.subscribeToAuditLogs(id, setLogs);
+    const unsubTasks = ledgerService.subscribeToCollectionTasks(id, format(new Date(), 'yyyy-MM-dd'), setCollectionTasks);
+
     return () => {
       unsubLedger();
       unsubCustomers();
       unsubOrders();
       unsubLogs();
+      unsubTasks();
     };
-  }, [id]);
+  }, [id, hasAccess, userProfile]);
+
+  useEffect(() => {
+    if (hasAccess === false) {
+      navigate('/');
+    }
+  }, [hasAccess, navigate]);
 
   // Subscribe to payments for expanded order
   useEffect(() => {
@@ -145,6 +263,51 @@ export const LedgerDetail: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (dailyTasks.length > 0 && activeTab === 'tasks') {
+      const pendingTasks = dailyTasks.filter(t => t.status === 'pending');
+      if (pendingTasks.length > 0) {
+        playSound('notification');
+        triggerVibration([200, 100, 200]);
+      }
+    }
+  }, [dailyTasks.length, activeTab]);
+
+  const handleUpdateTaskStatus = async (task: any, newStatus: string) => {
+    if (!id) return;
+    
+    const statusLabels: Record<string, string> = {
+      pending: '待收',
+      notified: '已通知',
+      collected: '已收',
+      other: '其他'
+    };
+
+    if (!window.confirm(`确认将该任务状态修改为 "${statusLabels[newStatus]}" 吗？`)) return;
+
+    playSound('click');
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      await ledgerService.updateCollectionTaskStatus(
+        task.orderId,
+        id,
+        today,
+        task.type,
+        newStatus,
+        task.amount,
+        userProfile?.displayName
+      );
+      
+      if (newStatus === 'collected') {
+        playSound('success');
+        triggerVibration(100);
+      }
+    } catch (error: any) {
+      playSound('error');
+      alert(error.message || '更新任务状态失败');
+    }
+  };
+
   const handleDeleteOrder = async (orderId: string) => {
     if (!id || !canApproveOrders) return;
     if (!window.confirm('您确定要删除此订单吗？此操作无法撤销。')) return;
@@ -155,17 +318,22 @@ export const LedgerDetail: React.FC = () => {
     }
   };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.phone?.includes(searchTerm)
-  );
+  const filteredCustomers = React.useMemo(() => {
+    return customers.filter(c => 
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      c.phone?.includes(searchTerm)
+    );
+  }, [customers, searchTerm]);
 
-  const filteredOrders = orders.filter(o => {
-    const customer = customers.find(c => c.id === o.customerId);
-    const matchesSearch = customer?.name.toLowerCase().includes(searchTerm.toLowerCase()) || o.id.includes(searchTerm);
-    const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredOrders = React.useMemo(() => {
+    const customerMap = new Map(customers.map(c => [c.id, c]));
+    return orders.filter(o => {
+      const customer = customerMap.get(o.customerId);
+      const matchesSearch = customer?.name.toLowerCase().includes(searchTerm.toLowerCase()) || o.id.includes(searchTerm);
+      const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [orders, customers, searchTerm, statusFilter]);
 
   const getActionName = (action: string) => {
     const actionMap: Record<string, string> = {
@@ -229,6 +397,20 @@ export const LedgerDetail: React.FC = () => {
           >
             <FileText className="w-5 h-5" />
             订单
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl transition-all font-semibold ${
+              activeTab === 'tasks' ? 'bg-emerald-600 text-white shadow-lg' : 'text-neutral-500 hover:bg-neutral-50'
+            }`}
+          >
+            <Clock className="w-5 h-5" />
+            待办任务
+            {dailyTasks.length > 0 && (
+              <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] ${activeTab === 'tasks' ? 'bg-white text-emerald-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                {dailyTasks.length}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('customers')}
@@ -319,12 +501,19 @@ export const LedgerDetail: React.FC = () => {
                         <StatusIcon className="w-7 h-7" />
                       </div>
                       <div className="flex-1">
-                        <h4 
-                          className="text-lg font-bold text-neutral-900 cursor-pointer hover:text-emerald-600 transition-colors"
-                          onClick={() => navigate(`/ledger/${id}/customer/${order.customerId}`)}
-                        >
-                          {customer?.name || '未知客户'}
-                        </h4>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 
+                            className="text-lg font-bold text-neutral-900 cursor-pointer hover:text-emerald-600 transition-colors"
+                            onClick={() => navigate(`/ledger/${id}/customer/${order.customerId}`)}
+                          >
+                            {customer?.name || '未知客户'}
+                          </h4>
+                          <span className="px-2 py-0.5 bg-neutral-100 text-neutral-500 rounded text-[10px] font-medium">
+                            {order.interestInterval === 'daily' ? '每日利息' : 
+                             order.interestInterval === 'weekly' ? '每周利息' : 
+                             order.interestInterval === 'monthly' ? '每月利息' : '一次性利息'}
+                          </span>
+                        </div>
                         <p className="text-sm text-neutral-500 flex items-center gap-2 mb-2">
                           <Calendar className="w-4 h-4" />
                           到期 {format(new Date(order.dueDate), 'yyyy年MM月dd日')}
@@ -370,9 +559,17 @@ export const LedgerDetail: React.FC = () => {
                         {/* Payment Button */}
                         {canRecordPayments && order.status !== 'completed' && order.status !== 'cancelled' && (
                           <button 
-                            onClick={() => setSelectedOrderForPayment({ ...order, totalDue, currentPaid })}
-                            className="ml-2 p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors"
-                            title="记录付款"
+                            onClick={() => {
+                              playSound('click');
+                              setSelectedOrderForPayment({ 
+                                id: order.id, 
+                                totalDue, 
+                                currentPaid,
+                                type: 'principal'
+                              });
+                            }}
+                            className="ml-2 p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                            title="本金还款"
                           >
                             <DollarSign className="w-5 h-5" />
                           </button>
@@ -435,7 +632,14 @@ export const LedgerDetail: React.FC = () => {
                                   </div>
                                   <div>
                                     <p className="text-sm font-bold text-neutral-900">${payment.amount.toLocaleString()}</p>
-                                    <p className="text-[10px] text-neutral-500">{format(new Date(payment.timestamp), 'yyyy年MM月dd日 HH:mm')}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-[10px] text-neutral-500">{format(new Date(payment.timestamp), 'yyyy年MM月dd日 HH:mm')}</p>
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                        payment.type === 'principal' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                                      }`}>
+                                        {payment.type === 'principal' ? '本金还款' : '利息收款'}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-4">
@@ -469,6 +673,113 @@ export const LedgerDetail: React.FC = () => {
             })}
             {filteredOrders.length === 0 && (
               <div className="py-20 text-center text-neutral-400">未找到订单。</div>
+            )}
+          </motion.div>
+        )}
+
+        {activeTab === 'tasks' && (
+          <motion.div
+            key="tasks"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {dailyTasks.filter(t => t.status !== 'collected').map((task) => {
+                return (
+                  <div 
+                    key={task.id} 
+                    className={`p-6 rounded-3xl border shadow-sm transition-all hover:shadow-md ${
+                      task.isOverdue ? 'bg-red-50 border-red-100' : 'bg-white border-neutral-100'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                          task.type === 'principal' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+                        }`}>
+                          {task.type === 'principal' ? <AlertCircle className="w-6 h-6" /> : <DollarSign className="w-6 h-6" />}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-neutral-900">{task.customerName}</h4>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-neutral-500">订单 #{task.orderId.slice(0, 8)}</p>
+                            {task.customerPhone && (
+                              <a 
+                                href={`tel:${task.customerPhone}`}
+                                onClick={() => playSound('click')}
+                                className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-bold"
+                              >
+                                <Phone className="w-3 h-3" />
+                                {task.customerPhone}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-lg font-bold ${
+                          task.type === 'principal' ? 'text-red-600' : 'text-emerald-600'
+                        }`}>
+                          ${task.amount.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-neutral-400 uppercase font-bold tracking-wider">
+                          {task.type === 'principal' ? '本金催收' : '利息催收'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-neutral-50 rounded-2xl p-4 mb-4">
+                      <p className={`text-sm font-medium ${task.isOverdue ? 'text-red-700' : 'text-neutral-600'}`}>
+                        {task.message}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex-1 flex gap-1">
+                        {[
+                          { id: 'pending', label: '待收', color: 'bg-neutral-100 text-neutral-600' },
+                          { id: 'notified', label: '已通知', color: 'bg-blue-100 text-blue-600' },
+                          { id: 'collected', label: '已收', color: 'bg-emerald-100 text-emerald-600' },
+                          { id: 'other', label: '其他', color: 'bg-purple-100 text-purple-600' }
+                        ].map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => handleUpdateTaskStatus(task, s.id)}
+                            className={`flex-1 py-2 px-1 rounded-xl text-[10px] font-bold transition-all ${
+                              task.status === s.id 
+                                ? `${s.color} ring-2 ring-offset-1 ring-current` 
+                                : 'bg-white border border-neutral-100 text-neutral-400 hover:bg-neutral-50'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={() => {
+                          playSound('click');
+                          navigate(`/ledger/${id}/order/${task.orderId}`);
+                        }}
+                        className="p-2 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-xl transition-all"
+                        title="查看订单详情"
+                      >
+                        <ExternalLink className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {dailyTasks.filter(t => t.status !== 'collected').length === 0 && (
+              <div className="py-20 text-center bg-white rounded-3xl border border-neutral-100">
+                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-bold text-neutral-900 mb-1">今日无待办任务</h3>
+                <p className="text-sm text-neutral-500">太棒了！所有的催收工作都已完成或暂无到期项。</p>
+              </div>
             )}
           </motion.div>
         )}
@@ -715,6 +1026,8 @@ export const LedgerDetail: React.FC = () => {
           orderId={selectedOrderForPayment.id}
           totalDue={selectedOrderForPayment.totalDue}
           currentPaid={selectedOrderForPayment.currentPaid}
+          userProfile={userProfile}
+          type={selectedOrderForPayment.type}
           onClose={() => setSelectedOrderForPayment(null)}
         />
       )}

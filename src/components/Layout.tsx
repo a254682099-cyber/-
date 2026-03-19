@@ -1,29 +1,34 @@
 import React, { ReactNode, useState, useEffect, useRef } from 'react';
-import { User, signOut } from 'firebase/auth';
+import { User as FirebaseUser, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
-import { LayoutDashboard, LogOut, BookOpen, Users, PieChart, Bell, AlertCircle, Clock, Menu, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, BookOpen, Users, PieChart, Bell, AlertCircle, Clock, Menu, X, UserCog } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ledgerService } from '../services/ledgerService';
 import { format, isPast, isToday, addDays } from 'date-fns';
+import { User } from '../types';
+
+import { playSound, triggerVibration } from '../utils/feedback';
 
 interface LayoutProps {
-  user: User;
+  user: FirebaseUser;
+  userProfile: User | null;
   children: ReactNode;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ user, children }) => {
+export const Layout: React.FC<LayoutProps> = ({ user, userProfile, children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [dbNotifications, setDbNotifications] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [hasAlertedToday, setHasAlertedToday] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const navItems = [
     { icon: LayoutDashboard, label: '仪表盘', path: '/' },
     { icon: PieChart, label: '报表', path: '/reports' },
+    ...(userProfile?.role === 'admin' || userProfile?.role === 'super_admin' ? [{ icon: UserCog, label: '成员管理', path: '/members' }] : []),
     { icon: Users, label: '设置', path: '/settings' },
   ];
 
@@ -42,6 +47,21 @@ export const Layout: React.FC<LayoutProps> = ({ user, children }) => {
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
 
+  const [ordersByLedger, setOrdersByLedger] = useState<{ [ledgerId: string]: any[] }>({});
+  const [tasksByLedger, setTasksByLedger] = useState<{ [ledgerId: string]: any[] }>({});
+  const seenTaskIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button') || target.closest('a')) {
+        playSound('click');
+      }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
+
   useEffect(() => {
     if (!user) return;
 
@@ -50,50 +70,144 @@ export const Layout: React.FC<LayoutProps> = ({ user, children }) => {
       setDbNotifications(notifs);
     });
 
-    const unsubLedgers = ledgerService.subscribeToLedgers((ledgers) => {
-      const orderUnsubs: any[] = [];
-      let allOrders: any[] = [];
+    // Manage ledger, order, and task subscriptions
+    let orderUnsubs: { [ledgerId: string]: () => void } = {};
+    let taskUnsubs: { [ledgerId: string]: () => void } = {};
 
-      ledgers.forEach(ledger => {
-        const unsubO = ledgerService.subscribeToOrders(ledger.id, (orders) => {
-          allOrders = [...allOrders.filter(o => o.ledgerId !== ledger.id), ...orders];
-          
-          // Calculate local alerts (overdue, due soon)
-          const alerts: any[] = [];
-          allOrders.forEach(order => {
-            if (order.status === 'completed' || order.status === 'cancelled') return;
-            
-            const dueDate = new Date(order.dueDate);
-            const isOverdue = isPast(dueDate) && !isToday(dueDate);
-            const isDueSoon = !isOverdue && dueDate <= addDays(new Date(), 3);
-            const isPending = order.status === 'pending_approval';
+    const unsubLedgers = ledgerService.subscribeToLedgers(async (ledgers: any[]) => {
+      // Check for overdue/today tasks to alert
+      let hasOverdueOrToday = false;
+      for (const ledger of ledgers) {
+        const orders = await ledgerService.getOrdersOnce(ledger.id) as any[];
+        const pending = orders.filter(o => 
+          o.status === 'active' && (isPast(new Date(o.dueDate)) || isToday(new Date(o.dueDate)))
+        );
+        if (pending.length > 0) {
+          hasOverdueOrToday = true;
+          break;
+        }
+      }
 
-            if (isOverdue) {
-              alerts.push({ id: order.id, type: 'overdue', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 已逾期！`, date: dueDate, isLocal: true });
-            } else if (isDueSoon) {
-              alerts.push({ id: order.id, type: 'due_soon', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 即将到期。`, date: dueDate, isLocal: true });
-            } else if (isPending) {
-              alerts.push({ id: order.id, type: 'pending', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 需要审批。`, date: new Date(order.createdAt), isLocal: true });
+      if (hasOverdueOrToday && !hasAlertedToday) {
+        playSound('notification');
+        triggerVibration([200, 100, 200]);
+        setHasAlertedToday(true);
+      }
+
+      // Clean up subscriptions for ledgers that are no longer present
+      const currentLedgerIds = ledgers.map(l => l.id);
+      
+      [orderUnsubs, taskUnsubs].forEach((unsubs, idx) => {
+        Object.keys(unsubs).forEach(id => {
+          if (!currentLedgerIds.includes(id)) {
+            unsubs[id]();
+            delete unsubs[id];
+            if (idx === 0) {
+              setOrdersByLedger(prev => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+            } else {
+              setTasksByLedger(prev => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
             }
-          });
-
-          // Sort by date (most urgent first)
-          alerts.sort((a, b) => a.date.getTime() - b.date.getTime());
-          setNotifications(alerts);
+          }
         });
-        orderUnsubs.push(unsubO);
       });
 
-      return () => {
-        orderUnsubs.forEach(u => u());
-      };
-    });
+      // Subscribe to new ledgers
+      const today = format(new Date(), 'yyyy-MM-dd');
+      ledgers.forEach(ledger => {
+        if (!orderUnsubs[ledger.id]) {
+          orderUnsubs[ledger.id] = ledgerService.subscribeToOrders(ledger.id, (orders) => {
+            setOrdersByLedger(prev => ({
+              ...prev,
+              [ledger.id]: orders
+            }));
+          });
+        }
+        if (!taskUnsubs[ledger.id]) {
+          taskUnsubs[ledger.id] = ledgerService.subscribeToCollectionTasks(ledger.id, today, (tasks) => {
+            setTasksByLedger(prev => ({
+              ...prev,
+              [ledger.id]: tasks
+            }));
+
+            // Check for new tasks to alert
+            tasks.forEach(task => {
+              if (!seenTaskIds.current.has(task.id)) {
+                seenTaskIds.current.add(task.id);
+                // Only alert if it's a new task or status is pending
+                if (task.status === 'pending') {
+                  playSound('notification');
+                  triggerVibration([200, 100, 200]);
+                }
+              }
+            });
+          });
+        }
+      });
+    }, userProfile);
 
     return () => {
       unsubNotifications();
       unsubLedgers();
+      Object.values(orderUnsubs).forEach(u => u());
+      Object.values(taskUnsubs).forEach(u => u());
     };
-  }, [user]);
+  }, [user, userProfile]);
+
+  const notifications = React.useMemo(() => {
+    const combinedOrders = Object.values(ordersByLedger).flat();
+    const alerts: any[] = [];
+    const now = new Date();
+    
+    combinedOrders.forEach(order => {
+      if (order.status === 'completed' || order.status === 'cancelled') return;
+      
+      const dueDate = new Date(order.dueDate);
+      const startDate = new Date(order.startDate);
+      const isOverdue = isPast(dueDate) && !isToday(dueDate);
+      const isDueSoon = !isOverdue && dueDate <= addDays(now, 3);
+      const isPending = order.status === 'pending_approval';
+
+      // Daily/Weekly/Monthly Collection Reminders
+      const interval = order.interestInterval || 'daily';
+      let isInterestDueToday = false;
+      
+      if (order.status === 'active' || order.status === 'overdue') {
+        if (interval === 'daily') {
+          isInterestDueToday = true;
+        } else if (interval === 'weekly') {
+          const diffDays = Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays % 7 === 0) isInterestDueToday = true;
+        } else if (interval === 'monthly') {
+          if (now.getDate() === startDate.getDate()) isInterestDueToday = true;
+        }
+      }
+
+      if (isOverdue) {
+        alerts.push({ id: `${order.id}-overdue`, type: 'overdue', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 已逾期！请催收本金。`, date: dueDate, isLocal: true });
+      } else if (isToday(dueDate)) {
+        alerts.push({ id: `${order.id}-due-today`, type: 'warning', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 今日到期！请催收本金。`, date: dueDate, isLocal: true });
+      } else if (isDueSoon) {
+        alerts.push({ id: `${order.id}-due-soon`, type: 'due_soon', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 即将到期。`, date: dueDate, isLocal: true });
+      } else if (isPending) {
+        alerts.push({ id: `${order.id}-pending`, type: 'pending', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 需要审批。`, date: new Date(order.createdAt), isLocal: true });
+      }
+
+      if (isInterestDueToday && !isToday(dueDate) && !isOverdue) {
+        alerts.push({ id: `${order.id}-interest`, type: 'info', ledgerId: order.ledgerId, message: `订单 #${order.id.slice(0,6)} 今日需催收利息。`, date: now, isLocal: true });
+      }
+    });
+
+    // Sort by date (most urgent first)
+    return alerts.sort((a, b) => b.date.getTime() - a.date.getTime());
+  }, [ordersByLedger]);
 
   const allNotifications = [
     ...dbNotifications.map(n => ({

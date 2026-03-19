@@ -6,13 +6,15 @@ import {
   deleteDoc, 
   getDoc, 
   getDocs, 
+  setDoc,
   query, 
   where, 
   onSnapshot,
-  orderBy
+  orderBy,
+  documentId
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { OperationType, FirestoreErrorInfo, UserRole } from '../types';
+import { OperationType, FirestoreErrorInfo, UserRole, User } from '../types';
 
 function handleFirestoreError(error: any, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
@@ -117,9 +119,16 @@ export const ledgerService = {
     if (!auth.currentUser) return;
     const path = 'auditLogs';
     try {
+      let userName = '未知用户';
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      if (userDoc.exists()) {
+        userName = userDoc.data().displayName || userDoc.data().username || '未知用户';
+      }
+      
       await addDoc(collection(db, path), {
         ledgerId,
         uid: auth.currentUser.uid,
+        userName,
         action,
         targetId,
         oldValue: oldValue || null,
@@ -162,11 +171,40 @@ export const ledgerService = {
     }
   },
 
-  subscribeToLedgers(callback: (ledgers: any[]) => void) {
+  subscribeToLedgers(callback: (ledgers: any[]) => void, userProfile?: User | null) {
     if (!auth.currentUser) return () => {};
     const path = 'ledgers';
     
-    // Subscribe to ledgers where user is in memberUids
+    // If admin, show all ledgers
+    if (userProfile?.role === 'admin' || userProfile?.role === 'super_admin') {
+      const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+      return onSnapshot(q, (snapshot) => {
+        const ledgers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        callback(ledgers);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      });
+    }
+
+    // If staff, show ledgers they are in OR in their accessibleLedgerIds
+    // Note: Firestore doesn't support OR between different fields easily in a single query with array-contains
+    // So we'll fetch all and filter client-side if needed, or just use memberUids if they are added there.
+    // However, the requirement says "these members are not part of the ledger", so they might not be in memberUids.
+    
+    // For simplicity and to avoid complex queries, if they have accessibleLedgerIds, we'll use them.
+    if (userProfile?.role === 'staff' && userProfile.accessibleLedgerIds?.length > 0) {
+      // We can't use 'in' with more than 10-30 items, but it's likely fine for now.
+      // If they have many, we might need a different approach.
+      const q = query(collection(db, path), where(documentId(), 'in', userProfile.accessibleLedgerIds));
+      return onSnapshot(q, (snapshot) => {
+        const ledgers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        callback(ledgers);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      });
+    }
+
+    // Default: Subscribe to ledgers where user is in memberUids
     const q = query(collection(db, path), where('memberUids', 'array-contains', auth.currentUser.uid));
     
     return onSnapshot(q, (snapshot) => {
@@ -353,6 +391,7 @@ export const ledgerService = {
         ...data,
         ledgerId,
         status: 'pending_approval',
+        interestInterval: data.interestInterval || 'daily',
         createdAt: new Date().toISOString()
       });
       await this.logAction(ledgerId, 'CREATE_ORDER', docRef.id, '', 'pending_approval');
@@ -360,6 +399,18 @@ export const ledgerService = {
       return docRef.id;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  },
+
+  async getOrdersOnce(ledgerId: string) {
+    const path = 'orders';
+    try {
+      const q = query(collection(db, path), where('ledgerId', '==', ledgerId));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
     }
   },
 
@@ -403,36 +454,8 @@ export const ledgerService = {
     }
   },
 
-  async recordPayment(ledgerId: string, orderId: string, amount: number, currentPaid: number = 0) {
-    const path = `orders/${orderId}`;
-    try {
-      const newPaid = currentPaid + amount;
-      await updateDoc(doc(db, 'orders', orderId), { paidAmount: newPaid });
-      
-      // Add to payments subcollection
-      const paymentsRef = collection(db, `orders/${orderId}/payments`);
-      await addDoc(paymentsRef, {
-        amount,
-        timestamp: new Date().toISOString(),
-        uid: auth.currentUser?.uid,
-      });
-
-      await this.logAction(ledgerId, 'RECORD_PAYMENT', orderId, currentPaid.toString(), newPaid.toString());
-      await this.createNotification(ledgerId, '已记录付款', `已为订单 #${orderId.slice(0, 8)} 记录了一笔 $${amount} 的付款。`, 'success');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
-    }
-  },
-
-  subscribeToPayments(orderId: string, callback: (payments: any[]) => void) {
-    const path = `orders/${orderId}/payments`;
-    const q = query(collection(db, path), orderBy('timestamp', 'desc'));
-    return onSnapshot(q, (snapshot) => {
-      const payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      callback(payments);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
+  async recordPayment(ledgerId: string, orderId: string, amount: number, type: 'interest' | 'principal' = 'principal', userName?: string) {
+    return this.createPayment(orderId, ledgerId, amount, type, userName);
   },
 
   async deletePayment(ledgerId: string, orderId: string, paymentId: string, amount: number, currentPaid: number) {
@@ -468,5 +491,96 @@ export const ledgerService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
     }
+  },
+
+  // Collection Tasks
+  subscribeToCollectionTasks(ledgerId: string, date: string, callback: (tasks: any[]) => void) {
+    const path = 'collectionTasks';
+    const q = query(
+      collection(db, path), 
+      where('ledgerId', '==', ledgerId),
+      where('date', '==', date)
+    );
+    return onSnapshot(q, (snapshot) => {
+      const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(tasks);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+  },
+
+  async updateCollectionTaskStatus(orderId: string, ledgerId: string, date: string, type: string, status: string, amount?: number, userName?: string) {
+    const taskId = `${orderId}_${date}_${type}`;
+    const path = `collectionTasks/${taskId}`;
+    try {
+      const taskRef = doc(db, 'collectionTasks', taskId);
+      const taskSnap = await getDoc(taskRef);
+      
+      if (taskSnap.exists()) {
+        await updateDoc(taskRef, { 
+          status,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        await setDoc(taskRef, {
+          orderId,
+          ledgerId,
+          date,
+          type,
+          status,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      // If status is 'collected', automatically create a payment record
+      if (status === 'collected' && amount !== undefined) {
+        await this.createPayment(orderId, ledgerId, amount, type as any, userName);
+      }
+
+      await this.logAction(ledgerId, 'UPDATE_TASK_STATUS', taskId, '', status);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  async createPayment(orderId: string, ledgerId: string, amount: number, type: 'interest' | 'principal', userName?: string) {
+    const path = `orders/${orderId}/payments`;
+    try {
+      const docRef = await addDoc(collection(db, path), {
+        orderId,
+        ledgerId,
+        amount,
+        type,
+        timestamp: new Date().toISOString(),
+        uid: auth.currentUser?.uid,
+        userName: userName || auth.currentUser?.displayName || '未知用户'
+      });
+      
+      // Update order paidAmount if it's principal
+      if (type === 'principal') {
+        const orderRef = doc(db, 'orders', orderId);
+        const orderSnap = await getDoc(orderRef);
+        if (orderSnap.exists()) {
+          const currentPaid = orderSnap.data().paidAmount || 0;
+          await updateDoc(orderRef, { paidAmount: currentPaid + amount });
+        }
+      }
+
+      await this.logAction(ledgerId, 'CREATE_PAYMENT', docRef.id, '', `${type}: ${amount}`);
+      return docRef.id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  },
+
+  subscribeToPayments(orderId: string, callback: (payments: any[]) => void) {
+    const path = `orders/${orderId}/payments`;
+    const q = query(collection(db, path), orderBy('timestamp', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      const payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(payments);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
   }
 };

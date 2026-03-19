@@ -12,36 +12,27 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { User as UserProfile } from '../types';
 
-export const Settings: React.FC = () => {
+interface SettingsProps {
+  userProfile: UserProfile | null;
+}
+
+export const Settings: React.FC<SettingsProps> = ({ userProfile: initialProfile }) => {
   const user = auth.currentUser;
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
-  const [userProfile, setUserProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(initialProfile);
+  const [loading, setLoading] = useState(!initialProfile);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const docRef = doc(db, 'users', user.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setUserProfile(docSnap.data());
-        }
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProfile();
-  }, [user]);
+    if (initialProfile) {
+      setUserProfile(initialProfile);
+      setLoading(false);
+    }
+  }, [initialProfile]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

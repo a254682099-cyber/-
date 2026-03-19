@@ -1,10 +1,11 @@
-export type UserRole = 'super_admin' | 'ledger_admin' | 'auditor' | 'collector' | 'readonly';
+export type UserRole = 'super_admin' | 'admin' | 'staff' | 'ledger_admin' | 'auditor' | 'collector' | 'readonly' | 'client';
 
-export interface UserProfile {
+export interface User {
   uid: string;
   email: string;
   displayName?: string;
   role: UserRole;
+  accessibleLedgerIds?: string[];
   createdAt: string;
 }
 
@@ -32,20 +33,35 @@ export interface Customer {
 }
 
 export type OrderStatus = 'pending_approval' | 'active' | 'overdue' | 'completed' | 'cancelled';
+export type InterestInterval = 'daily' | 'weekly' | 'monthly' | 'once';
+
+export type CollectionTaskStatus = 'pending' | 'notified' | 'collected' | 'other';
+export type CollectionTaskType = 'principal' | 'interest';
+
+export interface CollectionTask {
+  id: string;
+  orderId: string;
+  ledgerId: string;
+  date: string; // YYYY-MM-DD
+  type: CollectionTaskType;
+  status: CollectionTaskStatus;
+  updatedAt: string;
+}
 
 export interface Order {
   id: string;
   ledgerId: string;
   customerId: string;
   principal: number;
-  interestRate: number; // monthly or annual? let's assume monthly for now
+  interestRate: number; 
+  interestInterval: InterestInterval;
   termDays: number;
   startDate: string;
   dueDate: string;
   status: OrderStatus;
-  paidAmount?: number; // Track partial or full payments
+  paidAmount?: number;
   collectorUid?: string;
-  notes?: string;
+  notes?: any[];
   createdAt: string;
 }
 
@@ -53,6 +69,7 @@ export interface AuditLog {
   id: string;
   ledgerId: string;
   uid: string;
+  userName?: string;
   action: string;
   targetId: string;
   oldValue?: string;
@@ -60,12 +77,26 @@ export interface AuditLog {
   timestamp: string;
 }
 
+export type PaymentType = 'interest' | 'principal';
+
 export interface Payment {
   id: string;
   orderId: string;
+  ledgerId: string;
   amount: number;
+  type: PaymentType;
   timestamp: string;
   uid: string;
+  userName?: string;
+}
+
+export interface SystemMember {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  accessibleLedgerIds: string[];
+  createdAt: string;
 }
 
 export enum OperationType {

@@ -13,6 +13,7 @@ interface EditOrderModalProps {
 export const EditOrderModal: React.FC<EditOrderModalProps> = ({ ledgerId, order, onClose }) => {
   const [principal, setPrincipal] = useState(order.principal?.toString() || '');
   const [interestRate, setInterestRate] = useState(order.interestRate?.toString() || '');
+  const [interestInterval, setInterestInterval] = useState<'daily' | 'weekly' | 'monthly' | 'once'>(order.interestInterval || 'daily');
   const [termDays, setTermDays] = useState(order.termDays?.toString() || '');
   const [startDate, setStartDate] = useState(order.startDate ? format(new Date(order.startDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,7 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({ ledgerId, order,
       await ledgerService.updateOrder(ledgerId, order.id, {
         principal: parseFloat(principal),
         interestRate: parseFloat(interestRate),
+        interestInterval,
         termDays: parseInt(termDays),
         startDate: start.toISOString(),
         dueDate: due.toISOString(),
@@ -95,6 +97,20 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({ ledgerId, order,
                   />
                   <Percent className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-neutral-700 mb-2">利息结算间隔</label>
+                <select
+                  value={interestInterval}
+                  onChange={(e) => setInterestInterval(e.target.value as any)}
+                  className="w-full px-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white"
+                >
+                  <option value="daily">每天</option>
+                  <option value="weekly">每周</option>
+                  <option value="monthly">每月</option>
+                  <option value="once">到期一次性</option>
+                </select>
               </div>
             </div>
 

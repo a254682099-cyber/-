@@ -3,15 +3,19 @@ import { ledgerService } from '../services/ledgerService';
 import { X, DollarSign, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 
+import { User } from '../types';
+
 interface PaymentModalProps {
   ledgerId: string;
   orderId: string;
   totalDue: number;
   currentPaid: number;
+  userProfile: User | null;
+  type?: 'interest' | 'principal';
   onClose: () => void;
 }
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, totalDue, currentPaid, onClose }) => {
+export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, totalDue, currentPaid, userProfile, type = 'principal', onClose }) => {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -24,10 +28,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, t
     
     setLoading(true);
     try {
-      await ledgerService.recordPayment(ledgerId, orderId, paymentAmount, currentPaid);
+      await ledgerService.recordPayment(ledgerId, orderId, paymentAmount, type, userProfile?.displayName);
       
-      // If fully paid, auto-update status to completed
-      if (currentPaid + paymentAmount >= totalDue) {
+      // If fully paid and it's principal, auto-update status to completed
+      if (type === 'principal' && currentPaid + paymentAmount >= totalDue) {
         await ledgerService.updateOrderStatus(ledgerId, orderId, 'active', 'completed');
       }
       
@@ -51,12 +55,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, t
         </button>
 
         <div className="flex items-center gap-4 mb-8">
-          <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
-            <DollarSign className="text-emerald-600 w-6 h-6" />
+          <div className={`w-12 h-12 ${type === 'principal' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'} rounded-xl flex items-center justify-center`}>
+            <DollarSign className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-2xl font-bold text-neutral-900">记录付款</h3>
-            <p className="text-neutral-500">更新订单余额</p>
+            <h3 className="text-2xl font-bold text-neutral-900">{type === 'principal' ? '本金还款' : '利息收款'}</h3>
+            <p className="text-neutral-500">{type === 'principal' ? '更新订单余额' : '记录利息收入'}</p>
           </div>
         </div>
 

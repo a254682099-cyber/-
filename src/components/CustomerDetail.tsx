@@ -19,8 +19,13 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { auth } from '../firebase';
+import { User } from '../types';
 
-export const CustomerDetail: React.FC = () => {
+interface CustomerDetailProps {
+  userProfile: User | null;
+}
+
+export const CustomerDetail: React.FC<CustomerDetailProps> = ({ userProfile }) => {
   const { ledgerId, customerId } = useParams<{ ledgerId: string; customerId: string }>();
   const navigate = useNavigate();
   

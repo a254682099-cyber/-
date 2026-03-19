@@ -12,17 +12,20 @@ import {
   MessageSquare,
   History,
   TrendingUp,
-  User,
+  User as UserIcon,
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { auth } from '../firebase';
-
-import { EditOrderModal } from './EditOrderModal';
+import { User } from '../types';
 import { PaymentModal } from './PaymentModal';
 
-export const OrderDetail: React.FC = () => {
+interface OrderDetailProps {
+  userProfile: User | null;
+}
+
+export const OrderDetail: React.FC<OrderDetailProps> = ({ userProfile }) => {
   const { ledgerId, orderId } = useParams<{ ledgerId: string; orderId: string }>();
   const navigate = useNavigate();
   
@@ -183,7 +186,7 @@ export const OrderDetail: React.FC = () => {
                   {customer?.photoUrl ? (
                     <img src={customer.photoUrl} alt={customer.name} className="w-full h-full object-cover rounded-2xl" referrerPolicy="no-referrer" />
                   ) : (
-                    <User className="w-8 h-8" />
+                    <UserIcon className="w-8 h-8" />
                   )}
                 </div>
                 <div>
@@ -374,19 +377,13 @@ export const OrderDetail: React.FC = () => {
       </div>
 
       <AnimatePresence>
-        {isEditingOrder && (
-          <EditOrderModal
-            ledgerId={ledgerId!}
-            order={order}
-            onClose={() => setIsEditingOrder(false)}
-          />
-        )}
         {isRecordingPayment && (
           <PaymentModal
             ledgerId={ledgerId!}
             orderId={orderId!}
             totalDue={totalDue}
             currentPaid={currentPaid}
+            userProfile={userProfile}
             onClose={() => setIsRecordingPayment(false)}
           />
         )}

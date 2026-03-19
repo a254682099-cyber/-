@@ -7,10 +7,15 @@ import {
 import { TrendingUp, DollarSign, Users, FileText, Calendar, Filter, Download, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, eachDayOfInterval, startOfDay, endOfDay } from 'date-fns';
+import { User } from '../types';
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-export const Reports: React.FC = () => {
+interface ReportsProps {
+  userProfile: User | null;
+}
+
+export const Reports: React.FC<ReportsProps> = ({ userProfile }) => {
   const [ledgers, setLedgers] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
