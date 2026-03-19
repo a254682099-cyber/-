@@ -2,6 +2,78 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - role: string (required, enum: [super_admin, ledger_admin, auditor, collector, readonly])
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: ledgers
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - ownerUid: string (required, immutable)
+    //   - members: list of objects (optional)
+    //   - memberUids: list of strings (required)
+    //   - roles: map of uid -> role (required)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: customers
+    // Document ID: auto-generated
+    // Fields:
+    //   - ledgerId: string (required, immutable)
+    //   - name: string (required)
+    //   - phone: string (optional)
+    //   - idCard: string (optional)
+    //   - photoUrl: string (optional)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: orders
+    // Document ID: auto-generated
+    // Fields:
+    //   - ledgerId: string (required, immutable)
+    //   - customerId: string (required, immutable)
+    //   - principal: number (required, positive)
+    //   - interestRate: number (required, positive)
+    //   - termDays: integer (required, positive)
+    //   - startDate: string (required, ISO 8601)
+    //   - dueDate: string (required, ISO 8601)
+    //   - status: string (required, enum: [pending_approval, active, overdue, completed, cancelled])
+    //   - collectorUid: string (optional)
+    //   - notes: string (optional)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: notifications
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required, owner)
+    //   - ledgerId: string (required)
+    //   - title: string (required)
+    //   - message: string (required)
+    //   - type: string (required, enum: [info, success, warning, error])
+    //   - read: bool (required)
+    //   - timestamp: string (required, ISO 8601)
+    //
+    // Collection: auditLogs
+    // Document ID: auto-generated
+    // Fields:
+    //   - ledgerId: string (required)
+    //   - uid: string (required)
+    //   - action: string (required)
+    //   - targetId: string (required)
+    //   - oldValue: string (optional)
+    //   - newValue: string (optional)
+    //   - timestamp: string (required, ISO 8601)
+    //
+    // ===============================================================
+
+    // ===============================================================
     // Helper Functions
     // ===============================================================
     function isAuthenticated() {
@@ -34,12 +106,24 @@ service cloud.firestore {
       );
     }
 
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
 
     match /users/{uid} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated(); // Needed for searching users by email to add to ledger
       allow write: if isSuperAdmin() || (isAuthenticated() && request.auth.uid == uid);
     }
 
@@ -72,6 +156,25 @@ service cloud.firestore {
 
     function getLedgerIdFromOrder(orderId) {
       return get(/databases/$(database)/documents/orders/$(orderId)).data.ledgerId;
+    }
+
+    function isValidNotification(data) {
+      return data.uid is string &&
+             data.ledgerId is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 1000 &&
+             data.type in ['info', 'success', 'warning', 'error'] &&
+             data.read is bool &&
+             data.timestamp is string;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
+                    request.resource.data.read is bool;
+      allow delete: if false;
     }
 
     match /auditLogs/{logId} {

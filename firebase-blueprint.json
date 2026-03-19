@@ -85,6 +85,22 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["ledgerId", "uid", "action", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notifications for ledger events.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "ledgerId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "success", "warning", "error"] },
+        "read": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "ledgerId", "title", "message", "type", "read", "timestamp"]
     }
   },
   "firestore": {
@@ -92,6 +108,7 @@
     "/ledgers/{ledgerId}": { "schema": "Ledger", "description": "Ledgers" },
     "/customers/{customerId}": { "schema": "Customer", "description": "Customers" },
     "/orders/{orderId}": { "schema": "Order", "description": "Orders" },
-    "/auditLogs/{logId}": { "schema": "AuditLog", "description": "Audit logs" }
+    "/auditLogs/{logId}": { "schema": "AuditLog", "description": "Audit logs" },
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "User notifications" }
   }
 }

@@ -28,11 +28,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
-      let errorMessage = 'An unexpected error occurred.';
+      let errorMessage = '发生意外错误。';
       try {
         const parsedError = JSON.parse(this.state.error?.message || '');
         if (parsedError.error) {
-          errorMessage = `Firestore Error: ${parsedError.error} (Operation: ${parsedError.operationType})`;
+          errorMessage = `Firestore 错误: ${parsedError.error} (操作: ${parsedError.operationType})`;
         }
       } catch (e) {
         errorMessage = this.state.error?.message || errorMessage;
@@ -41,13 +41,13 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
           <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-red-100">
-            <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
+            <h2 className="text-2xl font-bold text-red-600 mb-4">出错了</h2>
             <p className="text-gray-600 mb-6">{errorMessage}</p>
             <button
               onClick={() => window.location.reload()}
               className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-colors"
             >
-              Reload Application
+              重新加载应用
             </button>
           </div>
         </div>

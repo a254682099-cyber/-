@@ -1,21 +1,20 @@
 import React, { useState } from 'react';
 import { ledgerService } from '../services/ledgerService';
-import { X, FilePlus, DollarSign, Percent, Calendar, Clock, Info } from 'lucide-react';
+import { X, FileEdit, DollarSign, Percent, Calendar, Clock, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 import { addDays, format } from 'date-fns';
 
-interface OrderFormProps {
+interface EditOrderModalProps {
   ledgerId: string;
-  customerId: string;
-  customerName: string;
+  order: any;
   onClose: () => void;
 }
 
-export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, customerName, onClose }) => {
-  const [principal, setPrincipal] = useState('');
-  const [interestRate, setInterestRate] = useState('5'); // 5% default
-  const [termDays, setTermDays] = useState('30'); // 30 days default
-  const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+export const EditOrderModal: React.FC<EditOrderModalProps> = ({ ledgerId, order, onClose }) => {
+  const [principal, setPrincipal] = useState(order.principal?.toString() || '');
+  const [interestRate, setInterestRate] = useState(order.interestRate?.toString() || '');
+  const [termDays, setTermDays] = useState(order.termDays?.toString() || '');
+  const [startDate, setStartDate] = useState(order.startDate ? format(new Date(order.startDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -25,18 +24,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
       const start = new Date(startDate);
       const due = addDays(start, parseInt(termDays));
       
-      await ledgerService.createOrder(ledgerId, {
-        customerId,
+      await ledgerService.updateOrder(ledgerId, order.id, {
         principal: parseFloat(principal),
         interestRate: parseFloat(interestRate),
         termDays: parseInt(termDays),
         startDate: start.toISOString(),
         dueDate: due.toISOString(),
-        notes: ''
       });
       onClose();
     } catch (error) {
-      console.error('Failed to create order:', error);
+      console.error('Failed to update order:', error);
     } finally {
       setLoading(false);
     }
@@ -57,12 +54,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
         </button>
 
         <div className="flex items-center gap-4 mb-8">
-          <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
-            <FilePlus className="text-emerald-600 w-6 h-6" />
+          <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+            <FileEdit className="text-blue-600 w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-2xl font-bold text-neutral-900">新订单</h3>
-            <p className="text-neutral-500">正在为 <span className="font-semibold text-neutral-900">{customerName}</span> 创建贷款</p>
+            <h3 className="text-2xl font-bold text-neutral-900">编辑订单</h3>
+            <p className="text-neutral-500">更新贷款参数</p>
           </div>
         </div>
 
@@ -79,7 +76,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
                     value={principal}
                     onChange={(e) => setPrincipal(e.target.value)}
                     placeholder="0.00"
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <DollarSign className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
                 </div>
@@ -94,7 +91,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
                     required
                     value={interestRate}
                     onChange={(e) => setInterestRate(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <Percent className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
                 </div>
@@ -110,7 +107,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
                     required
                     value={termDays}
                     onChange={(e) => setTermDays(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <Clock className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
                 </div>
@@ -124,7 +121,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
                     required
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                   />
                   <Calendar className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
                 </div>
@@ -145,7 +142,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
               </div>
               <div>
                 <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">利息</p>
-                <p className="text-lg font-bold text-emerald-600">+${calculatedInterest.toLocaleString()}</p>
+                <p className="text-lg font-bold text-blue-600">+${calculatedInterest.toLocaleString()}</p>
               </div>
               <div>
                 <p className="text-xs text-neutral-400 uppercase font-bold tracking-wider mb-1">应付总额</p>
@@ -170,9 +167,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({ ledgerId, customerId, cust
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-4 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? '创建中...' : '创建订单'}
+              {loading ? '保存中...' : '保存更改'}
             </button>
           </div>
         </form>

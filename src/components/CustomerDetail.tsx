@@ -30,6 +30,7 @@ export const CustomerDetail: React.FC = () => {
   const [ledger, setLedger] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<any>({});
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!ledgerId || !customerId) return;
@@ -61,6 +62,7 @@ export const CustomerDetail: React.FC = () => {
   const userRole = ledger?.roles?.[auth.currentUser?.uid || ''] || (ledger?.ownerUid === auth.currentUser?.uid ? 'ledger_admin' : 'readonly');
   const canEdit = ['ledger_admin', 'collector'].includes(userRole);
   const canDelete = ['ledger_admin'].includes(userRole);
+  const canApproveOrders = ['ledger_admin', 'auditor'].includes(userRole);
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,12 +74,22 @@ export const CustomerDetail: React.FC = () => {
   const handleDelete = async () => {
     if (!ledgerId || !customerId) return;
     if (orders.length > 0) {
-      alert('Cannot delete customer with existing orders.');
+      alert('无法删除有订单的客户。');
       return;
     }
-    if (window.confirm('Are you sure you want to delete this customer?')) {
+    if (window.confirm('您确定要删除此客户吗？')) {
       await ledgerService.deleteCustomer(ledgerId, customerId);
       navigate(`/ledger/${ledgerId}`);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!ledgerId) return;
+    if (!window.confirm('您确定要删除此订单吗？此操作无法撤销。')) return;
+    try {
+      await ledgerService.deleteOrder(ledgerId, orderId);
+    } catch (error: any) {
+      alert(error.message || '删除订单失败');
     }
   };
 
@@ -91,8 +103,19 @@ export const CustomerDetail: React.FC = () => {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-neutral-500">Loading customer details...</div>;
-  if (!customer) return <div className="text-center py-20 text-neutral-500">Customer not found.</div>;
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'active': return '活跃';
+      case 'overdue': return '逾期';
+      case 'completed': return '已完成';
+      case 'pending_approval': return '待审批';
+      case 'cancelled': return '已取消';
+      default: return status;
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-neutral-500">正在加载客户详情...</div>;
+  if (!customer) return <div className="text-center py-20 text-neutral-500">未找到客户。</div>;
 
   const totalBorrowed = orders.reduce((sum, o) => sum + (o.principal || 0), 0);
   const totalPaid = orders.reduce((sum, o) => sum + (o.paidAmount || 0), 0);
@@ -109,7 +132,7 @@ export const CustomerDetail: React.FC = () => {
           </button>
           <div>
             <h2 className="text-2xl font-bold text-neutral-900">{customer.name}</h2>
-            <p className="text-sm text-neutral-500">Customer Profile</p>
+            <p className="text-sm text-neutral-500">客户资料</p>
           </div>
         </div>
 
@@ -120,7 +143,7 @@ export const CustomerDetail: React.FC = () => {
               className="flex items-center gap-2 px-4 py-2 bg-white text-neutral-700 font-semibold rounded-xl border border-neutral-200 hover:bg-neutral-50 transition-colors shadow-sm"
             >
               <Edit2 className="w-4 h-4" />
-              Edit
+              编辑
             </button>
           )}
           {canDelete && (
@@ -129,7 +152,7 @@ export const CustomerDetail: React.FC = () => {
               className="flex items-center gap-2 px-4 py-2 bg-white text-red-600 font-semibold rounded-xl border border-red-100 hover:bg-red-50 transition-colors shadow-sm"
             >
               <Trash2 className="w-4 h-4" />
-              Delete
+              删除
             </button>
           )}
         </div>
@@ -150,32 +173,32 @@ export const CustomerDetail: React.FC = () => {
             <div className="space-y-4">
               <div className="flex items-center gap-3 text-neutral-600">
                 <Phone className="w-5 h-5 text-neutral-400" />
-                <span className="font-medium">{customer.phone || 'No phone'}</span>
+                <span className="font-medium">{customer.phone || '无电话'}</span>
               </div>
               <div className="flex items-center gap-3 text-neutral-600">
                 <CreditCard className="w-5 h-5 text-neutral-400" />
-                <span className="font-medium">{customer.idCard || 'No ID Card'}</span>
+                <span className="font-medium">{customer.idCard || '无身份证'}</span>
               </div>
               <div className="flex items-center gap-3 text-neutral-600">
                 <Calendar className="w-5 h-5 text-neutral-400" />
-                <span className="font-medium text-sm">Joined {format(new Date(customer.createdAt), 'MMM dd, yyyy')}</span>
+                <span className="font-medium text-sm">加入于 {format(new Date(customer.createdAt), 'yyyy年MM月dd日')}</span>
               </div>
             </div>
           </div>
 
           <div className="bg-emerald-600 p-8 rounded-3xl shadow-lg text-white">
-            <h4 className="text-emerald-100 text-sm font-bold uppercase tracking-wider mb-4">Summary</h4>
+            <h4 className="text-emerald-100 text-sm font-bold uppercase tracking-wider mb-4">摘要</h4>
             <div className="space-y-4">
               <div>
-                <p className="text-emerald-200 text-xs mb-1">Total Borrowed</p>
+                <p className="text-emerald-200 text-xs mb-1">总借款</p>
                 <p className="text-2xl font-bold">${totalBorrowed.toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-emerald-200 text-xs mb-1">Total Paid</p>
+                <p className="text-emerald-200 text-xs mb-1">已还款</p>
                 <p className="text-2xl font-bold">${totalPaid.toLocaleString()}</p>
               </div>
               <div className="pt-4 border-t border-emerald-500">
-                <p className="text-emerald-200 text-xs mb-1">Outstanding Balance</p>
+                <p className="text-emerald-200 text-xs mb-1">未结余额</p>
                 <p className="text-2xl font-bold text-amber-300">${(totalBorrowed - totalPaid).toLocaleString()}</p>
               </div>
             </div>
@@ -184,13 +207,27 @@ export const CustomerDetail: React.FC = () => {
 
         {/* Loan History */}
         <div className="lg:col-span-2 space-y-6">
-          <h3 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
-            <FileText className="w-6 h-6 text-emerald-600" />
-            Loan History
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
+              <FileText className="w-6 h-6 text-emerald-600" />
+              贷款历史
+            </h3>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-4 py-2 bg-white rounded-xl border border-neutral-200 focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-sm font-medium text-neutral-700"
+            >
+              <option value="all">所有状态</option>
+              <option value="active">活跃</option>
+              <option value="pending_approval">待审批</option>
+              <option value="overdue">逾期</option>
+              <option value="completed">已完成</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
           
           <div className="space-y-4">
-            {orders.map((order) => {
+            {orders.filter(o => statusFilter === 'all' || o.status === statusFilter).map((order) => {
               const calculatedInterest = (order.principal || 0) * (order.interestRate || 0) / 100;
               const totalDue = (order.principal || 0) + calculatedInterest;
               const currentPaid = order.paidAmount || 0;
@@ -208,23 +245,32 @@ export const CustomerDetail: React.FC = () => {
                         <span className="text-xs font-bold text-emerald-600">+{order.interestRate}%</span>
                       </div>
                       <p className="text-xs text-neutral-500 mb-3">
-                        Started {format(new Date(order.startDate), 'MMM dd, yyyy')}
+                        开始于 {format(new Date(order.startDate), 'yyyy年MM月dd日')}
                       </p>
                       <div className="w-full max-w-xs bg-neutral-100 rounded-full h-2 mb-1">
                         <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${progress}%` }}></div>
                       </div>
                       <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
-                        {progress}% Paid
+                        已付 {progress}%
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-4">
                     <div className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest ${getStatusColor(order.status)}`}>
-                      {order.status.replace('_', ' ')}
+                      {getStatusText(order.status)}
                     </div>
+                    {canApproveOrders && (
+                      <button 
+                        onClick={() => handleDeleteOrder(order.id)}
+                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="删除订单"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
                     <button 
-                      onClick={() => navigate(`/ledger/${ledgerId}`)}
+                      onClick={() => navigate(`/ledger/${ledgerId}/order/${order.id}`)}
                       className="p-2 text-neutral-400 hover:text-neutral-900 transition-colors"
                     >
                       <ArrowLeft className="w-5 h-5 rotate-180" />
@@ -233,9 +279,9 @@ export const CustomerDetail: React.FC = () => {
                 </div>
               );
             })}
-            {orders.length === 0 && (
+            {orders.filter(o => statusFilter === 'all' || o.status === statusFilter).length === 0 && (
               <div className="py-20 text-center text-neutral-400 bg-white rounded-3xl border border-dashed border-neutral-200">
-                No loan history found for this customer.
+                未找到该客户的贷款历史。
               </div>
             )}
           </div>
@@ -255,10 +301,10 @@ export const CustomerDetail: React.FC = () => {
               <button onClick={() => setIsEditing(false)} className="absolute top-6 right-6 text-neutral-400 hover:text-neutral-900">
                 <X className="w-6 h-6" />
               </button>
-              <h3 className="text-2xl font-bold text-neutral-900 mb-6">Edit Customer</h3>
+              <h3 className="text-2xl font-bold text-neutral-900 mb-6">编辑客户</h3>
               <form onSubmit={handleUpdate} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 mb-1">Name</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">姓名</label>
                   <input
                     type="text"
                     required
@@ -268,7 +314,7 @@ export const CustomerDetail: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 mb-1">Phone</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">电话</label>
                   <input
                     type="text"
                     value={editData.phone}
@@ -277,7 +323,7 @@ export const CustomerDetail: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 mb-1">ID Card</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">身份证号</label>
                   <input
                     type="text"
                     value={editData.idCard}
@@ -286,7 +332,7 @@ export const CustomerDetail: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 mb-1">Photo URL</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">照片 URL</label>
                   <input
                     type="text"
                     value={editData.photoUrl}
@@ -300,14 +346,14 @@ export const CustomerDetail: React.FC = () => {
                     onClick={() => setIsEditing(false)}
                     className="flex-1 py-3 px-4 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-xl transition-colors"
                   >
-                    Cancel
+                    取消
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors shadow-lg flex items-center justify-center gap-2"
                   >
                     <Save className="w-4 h-4" />
-                    Save Changes
+                    保存更改
                   </button>
                 </div>
               </form>

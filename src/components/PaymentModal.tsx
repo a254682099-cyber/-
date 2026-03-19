@@ -55,29 +55,29 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, t
             <DollarSign className="text-emerald-600 w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-2xl font-bold text-neutral-900">Record Payment</h3>
-            <p className="text-neutral-500">Update order balance</p>
+            <h3 className="text-2xl font-bold text-neutral-900">记录付款</h3>
+            <p className="text-neutral-500">更新订单余额</p>
           </div>
         </div>
 
         <div className="bg-neutral-50 rounded-2xl p-6 border border-neutral-100 mb-6">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-neutral-500">Total Due</span>
+            <span className="text-sm text-neutral-500">应付总额</span>
             <span className="font-bold text-neutral-900">${totalDue.toLocaleString()}</span>
           </div>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-neutral-500">Already Paid</span>
+            <span className="text-sm text-neutral-500">已付金额</span>
             <span className="font-bold text-emerald-600">${currentPaid.toLocaleString()}</span>
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-neutral-200">
-            <span className="text-sm font-bold text-neutral-900">Remaining</span>
+            <span className="text-sm font-bold text-neutral-900">剩余金额</span>
             <span className="font-bold text-red-500">${remaining.toLocaleString()}</span>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-semibold text-neutral-700 mb-2">Payment Amount</label>
+            <label className="block text-sm font-semibold text-neutral-700 mb-2">付款金额</label>
             <div className="relative">
               <input
                 autoFocus
@@ -98,7 +98,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, t
                 onClick={() => setAmount(remaining.toString())}
                 className="text-xs text-emerald-600 font-semibold hover:text-emerald-700"
               >
-                Pay Full Remaining
+                支付全部剩余金额
               </button>
             </div>
           </div>
@@ -109,14 +109,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ ledgerId, orderId, t
               onClick={onClose}
               className="flex-1 py-4 px-6 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-2xl transition-colors"
             >
-              Cancel
+              取消
             </button>
             <button
               type="submit"
               disabled={loading || !amount || parseFloat(amount) <= 0}
               className="flex-1 py-4 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Saving...' : 'Record'}
+              {loading ? '保存中...' : '记录'}
             </button>
           </div>
         </form>

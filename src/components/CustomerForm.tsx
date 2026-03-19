@@ -43,13 +43,13 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ ledgerId, onClose })
           <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
             <UserPlus className="text-blue-600 w-6 h-6" />
           </div>
-          <h3 className="text-2xl font-bold text-neutral-900">Add New Customer</h3>
+          <h3 className="text-2xl font-bold text-neutral-900">添加新客户</h3>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 gap-6">
             <div>
-              <label className="block text-sm font-semibold text-neutral-700 mb-2">Full Name</label>
+              <label className="block text-sm font-semibold text-neutral-700 mb-2">全名</label>
               <div className="relative">
                 <input
                   autoFocus
@@ -57,7 +57,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ ledgerId, onClose })
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="John Doe"
+                  placeholder="张三"
                   className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 />
                 <UserPlus className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
@@ -65,13 +65,13 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ ledgerId, onClose })
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-neutral-700 mb-2">Phone Number</label>
+              <label className="block text-sm font-semibold text-neutral-700 mb-2">电话号码</label>
               <div className="relative">
                 <input
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 (555) 000-0000"
+                  placeholder="13800138000"
                   className="w-full pl-11 pr-4 py-3 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 />
                 <Phone className="absolute left-4 top-3.5 text-neutral-400 w-5 h-5" />
@@ -79,7 +79,7 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ ledgerId, onClose })
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-neutral-700 mb-2">ID Card / Passport Number</label>
+              <label className="block text-sm font-semibold text-neutral-700 mb-2">身份证号 / 护照号</label>
               <div className="relative">
                 <input
                   type="text"
@@ -99,14 +99,14 @@ export const CustomerForm: React.FC<CustomerFormProps> = ({ ledgerId, onClose })
               onClick={onClose}
               className="flex-1 py-4 px-6 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-2xl transition-colors"
             >
-              Cancel
+              取消
             </button>
             <button
               type="submit"
               disabled={loading}
               className="flex-1 py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Adding...' : 'Add Customer'}
+              {loading ? '添加中...' : '添加客户'}
             </button>
           </div>
         </form>

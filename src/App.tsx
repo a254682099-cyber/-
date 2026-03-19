@@ -9,6 +9,8 @@ import { Dashboard } from './components/Dashboard';
 import { LedgerDetail } from './components/LedgerDetail';
 import { Reports } from './components/Reports';
 import { CustomerDetail } from './components/CustomerDetail';
+import { OrderDetail } from './components/OrderDetail';
+import { Settings } from './components/Settings';
 import { Layout } from './components/Layout';
 
 export default function App() {
@@ -57,7 +59,9 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/ledger/:id" element={<LedgerDetail />} />
               <Route path="/ledger/:ledgerId/customer/:customerId" element={<CustomerDetail />} />
+              <Route path="/ledger/:ledgerId/order/:orderId" element={<OrderDetail />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>
